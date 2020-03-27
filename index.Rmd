@@ -15,11 +15,12 @@ library(tidycensus)
 library(mapview)
 library(tmap)
 library(sf)
+library(crosstalk)
 library(tmaptools)
 tmap_mode('view')
 ```
 
-```{r get census data with shapefiles, message=FALSE, warning=FALSE}
+```{r get census data with shapefiles}
 # B27010_051 65 and over pop
 # B27010_001 total pop
 
@@ -39,7 +40,7 @@ counties <- counties %>%
          'Geo_QNAME' = 'NAME')
 ```
 
-```{r import County Health Rankings data and merge, message=FALSE, warning=FALSE}
+```{r import County Health Rankings data and merge}
 
 health_rank_full <- read_csv('health_county_full_2016.csv')
 
@@ -78,12 +79,7 @@ cases_health_counties <- cases_health_counties %>%
   mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (`Total Population` / 100000))
 ```
 
-Cases By County
-=============================================================
-
-### Map
-
-```{r map, message=FALSE, warning=FALSE}
+```{r reproject and use with crosswalk}
 
 shape_reproj <- set_projection(cases_health_counties, projection = 'longlat')
 
@@ -93,9 +89,24 @@ cty_map <- tm_shape(shape_reproj) +
     title.size = 1,
     title.position = c("center", "top"))
 
-# tm_format
+shared_cty_map <- SharedData$new(cty_map)
+```
 
-cty_map
+Cases By County
+=============================================================
+
+Sidebar1 {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", shared_cty_map, ~`Percent Population 65 and Above`)
+```
+
+### Map
+
+```{r map, message=FALSE, warning=FALSE}
+
+shared_cty_map
 
 # tmap_save(cty_map, filename = 'county_map_test_v2.html')
 
