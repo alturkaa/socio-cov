@@ -1,0 +1,110 @@
+---
+title: First Map
+author: Akram Al-Turk
+date: '2020-03-26'
+slug: first-map
+categories: []
+tags: []
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidycensus)
+library(mapview)
+library(tmap)
+library(sf)
+library(tmaptools)
+tmap_mode('view')
+```
+
+```{r get census data with shapefiles, message=FALSE, warning=FALSE}
+# B27010_051 65 and over pop
+# B27010_001 total pop
+
+vars <- c('B27010_001', 'B27010_051')
+
+us_county_test <- get_acs(geography = "county", year = 2018, variables = vars, 
+                            shift_geo = TRUE, geometry = TRUE)
+
+counties <- us_county_test %>% 
+  select(-moe) %>% 
+  group_by(GEOID) %>% 
+  spread(variable, estimate)
+
+counties <- counties %>% 
+  mutate(prop_65_above = B27010_051 / B27010_001) %>%
+  rename('Geo_FIPS' = 'GEOID',
+         'Geo_QNAME' = 'NAME')
+```
+
+```{r import County Health Rankings data and merge, message=FALSE, warning=FALSE}
+
+health_rank_full <- read_csv('health_county_full_2016.csv')
+
+cols_to_keep <- c('Geo_QNAME', 'Geo_NAME', 'Geo_FIPS', 'ORG_HD2016_001_HEALTH_T6_V25', 'ORG_HD2016_001_HEALTH_T6_V13', 'ORG_HD2016_003_HEALTH_T9_V9', 'ORG_HD2016_006_HEALTH_T3_V42', 'ORG_HD2016_006_HEALTH_T3_V35', 'ORG_HD2016_006_HEALTH_T3_V25')
+
+health_condense <- health_rank_full %>% 
+  select(., all_of(cols_to_keep)) %>% 
+  rename('Total Population' = 'ORG_HD2016_001_HEALTH_T6_V25',
+         'Percent Population 65 and Above' = 'ORG_HD2016_001_HEALTH_T6_V13',
+         'Percent Uninsured (Ages 18-64)' = 'ORG_HD2016_003_HEALTH_T9_V9',
+         'Percent Without Insurance (Under 65)' = 'ORG_HD2016_006_HEALTH_T3_V42',
+         'Primary Care Physicians per 100K' = 'ORG_HD2016_006_HEALTH_T3_V35',
+         'Preventable Hospital Stays per 100K Medicare enrollees' = 'ORG_HD2016_006_HEALTH_T3_V25')
+
+health_counties <- merge(counties, health_condense, by = 'Geo_FIPS')
+```
+```{r import cases data and merge, message=FALSE, warning=FALSE}
+cases_url_march_24 <- 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/03-24-2020.csv'
+
+# tmp <- tempfile()
+# curl_download(url, tmp)
+
+cases <- read_csv(cases_url_march_24)
+
+us_cases <- cases %>% 
+  filter(Country_Region == 'US') %>% 
+  rename('Geo_FIPS' = 'FIPS',
+         'Confirmed Cases' = 'Confirmed')
+
+# length(unique(us_cases$Geo_FIPS))
+
+cases_health_counties <- merge(health_counties, us_cases, by = 'Geo_FIPS')
+
+cases_health_counties <- cases_health_counties %>% 
+  mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (`Total Population` / 10000)) %>% 
+  mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (`Total Population` / 100000))
+```
+
+```{r map, message=FALSE, warning=FALSE}
+
+shape_reproj <- set_projection(cases_health_counties, projection = 'longlat')
+
+cty_map <- tm_shape(shape_reproj) +
+  tm_polygons('Confirmed Cases per 100K', style = 'jenks', popup.vars = c('Geo_NAME', 'Total Population', 'Percent Population 65 and Above', 'Primary Care Physicians per 100K', 'Percent Without Insurance (Under 65)', 'Confirmed Cases', 'Confirmed Cases per 100K')) +
+  tm_layout(title = "Per Capita COVID-19 Confirmed Cases By County",
+    title.size = 1,
+    title.position = c("center", "top"))
+
+# tm_format
+
+cty_map
+
+# tmap_save(cty_map, filename = 'county_map_test_v2.html')
+
+# cty_layers <- tm_shape(shape_reproj) +
+#   tm_polygons(c('Confirmed Cases per 100K', 'Primary Care Physicians per 100K'),
+#               style = 'jenks', 
+#               popup.vars = c('Geo_NAME', 'Total Population', 'Percent Population 65 and Above', 'Primary Care Physicians per 100K', 'Percent Without Insurance (Under 65)', 'Confirmed Cases', 'Confirmed Cases per 100K'),
+#               title = c('Confirmed Cases per 100K', 'Primary Care Physicians per 100K')) +
+#   tm_facets(as.layers = TRUE)
+#   # tm_layout(title = "Per Capita COVID-19 Confirmed Cases By County",
+#   #   title.size = 1,
+#   #   title.position = c("center", "top"))
+# 
+# cty_layers
+```
