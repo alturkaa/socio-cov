@@ -1,10 +1,12 @@
 ---
-title: First Map
-author: Akram Al-Turk
-date: '2020-03-26'
-slug: first-map
-categories: []
-tags: []
+title: "Test Site"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    navbar:
+      - {title: "Me", href: "https://akramalturk.org/", align: right}
+      - {icon: "fa-github", href: "https://github.com/alturkaa/socio-cov", align: right }
 ---
 
 ```{r setup, include=FALSE}
