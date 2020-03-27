@@ -9,11 +9,7 @@ output:
       - {icon: "fa-github", href: "https://github.com/alturkaa/socio-cov", align: right }
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-```{r packages, message=FALSE, warning=FALSE}
+```{r packages, include=FALSE}
 library(tidyverse)
 library(tidycensus)
 library(mapview)
@@ -81,6 +77,11 @@ cases_health_counties <- cases_health_counties %>%
   mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (`Total Population` / 10000)) %>% 
   mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (`Total Population` / 100000))
 ```
+
+Cases By County
+=============================================================
+
+### Map
 
 ```{r map, message=FALSE, warning=FALSE}
 
