@@ -1,11 +1,10 @@
 ---
-title: "Test Site"
+title: "COVID-19 Data"
 output: 
   flexdashboard::flex_dashboard:
     orientation: columns
     vertical_layout: fill
     navbar:
-      - {title: "Me", href: "https://akramalturk.org/", align: right}
       - {icon: "fa-github", href: "https://github.com/alturkaa/socio-cov", align: right }
 ---
 
@@ -15,6 +14,7 @@ library(tidycensus)
 library(mapview)
 library(tmap)
 library(sf)
+library(leaflet)
 library(crosstalk)
 library(tmaptools)
 tmap_mode('view')
@@ -35,14 +35,14 @@ counties <- us_county_test %>%
   spread(variable, estimate)
 
 counties <- counties %>% 
-  mutate(prop_65_above = B27010_051 / B27010_001) %>%
+  mutate(prop_65_above_acs_2018 = B27010_051 / B27010_001) %>%
   rename('Geo_FIPS' = 'GEOID',
          'Geo_QNAME' = 'NAME')
 ```
 
 ```{r import County Health Rankings data and merge}
 
-health_rank_full <- read_csv('health_county_full_2016.csv')
+health_rank_full <- read_csv('../health_county_full_2016.csv')
 
 cols_to_keep <- c('Geo_QNAME', 'Geo_NAME', 'Geo_FIPS', 'ORG_HD2016_001_HEALTH_T6_V25', 'ORG_HD2016_001_HEALTH_T6_V13', 'ORG_HD2016_003_HEALTH_T9_V9', 'ORG_HD2016_006_HEALTH_T3_V42', 'ORG_HD2016_006_HEALTH_T3_V35', 'ORG_HD2016_006_HEALTH_T3_V25')
 
@@ -58,14 +58,14 @@ health_condense <- health_rank_full %>%
 health_counties <- merge(counties, health_condense, by = 'Geo_FIPS')
 ```
 ```{r import cases data and merge, message=FALSE, warning=FALSE}
-cases_url_march_24 <- 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/03-24-2020.csv'
 
-# tmp <- tempfile()
-# curl_download(url, tmp)
+yesterday <- format(Sys.Date()-1, "%m-%d-%Y")
 
-cases <- read_csv(cases_url_march_24)
+cases_url <- paste0('https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/', yesterday, '.csv')
 
-us_cases <- cases %>% 
+cumulative_cases_yesterday <- read_csv(cases_url)
+
+us_cases <- cumulative_cases_yesterday %>% 
   filter(Country_Region == 'US') %>% 
   rename('Geo_FIPS' = 'FIPS',
          'Confirmed Cases' = 'Confirmed')
@@ -75,38 +75,85 @@ us_cases <- cases %>%
 cases_health_counties <- merge(health_counties, us_cases, by = 'Geo_FIPS')
 
 cases_health_counties <- cases_health_counties %>% 
-  mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (`Total Population` / 10000)) %>% 
-  mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (`Total Population` / 100000))
+  mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (B27010_001 / 10000)) %>% 
+  mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B27010_001 / 100000))
 ```
 
 ```{r reproject and use with crosswalk}
 
-shape_reproj <- set_projection(cases_health_counties, projection = 'longlat')
+cases_counties_final <- set_projection(cases_health_counties, projection = 'longlat')
 
-cty_map <- tm_shape(shape_reproj) +
-  tm_polygons('Confirmed Cases per 100K', style = 'jenks', popup.vars = c('Geo_NAME', 'Total Population', 'Percent Population 65 and Above', 'Primary Care Physicians per 100K', 'Percent Without Insurance (Under 65)', 'Confirmed Cases', 'Confirmed Cases per 100K')) +
-  tm_layout(title = "Per Capita COVID-19 Confirmed Cases By County",
-    title.size = 1,
-    title.position = c("center", "top"))
+# st_crs(shape_reproj)
 
-shared_cty_map <- SharedData$new(cty_map)
+# st_transform(crs = "+init=epsg:4326")
+
+shared_cty <- SharedData$new(cases_counties_final)
+
+# st_crs(shared_cty)
+
+# cty_map <- tm_shape(cases_counties_final) +
+#   tm_polygons('Confirmed Cases per 10K', style = 'jenks', popup.vars = c('Geo_NAME', 'Total Population', 'Percent Population 65 and Above', 'Primary Care Physicians per 100K', 'Percent Without Insurance (Under 65)', 'Confirmed Cases', 'Confirmed Cases per 10K')) +
+#   tm_layout(title = "Per Capita COVID-19 Confirmed Cases By County",
+#     title.size = 1,
+#     title.position = c("center", "top"))
+
+# classInt::classIntervals(cases_counties_final$`Confirmed Cases per 10K`, n = 5, style = 'jenks')
+
+# cty_map <- st_transform(cty_map, crs = 4326)
+
+labels <- paste0(shared_cty$data()$Geo_NAME, "<br/>", "Confirmed Cases per 10K: ", round(shared_cty$data()$`Confirmed Cases per 10K`, 1))
+
+labels_v2 <- sprintf(
+  "<strong>%s</strong><br/>Confirmed Cases per 10K: %g",
+  shared_cty$data()$Geo_NAME, round(shared_cty$data()$`Confirmed Cases per 10K`, 1)
+)
+
+bins <- c(0, 1.25, 5, 20, 60, 135)
+
+pal <- colorBin(
+  palette = "YlGnBu",
+  domain = cases_counties_final$`Confirmed Cases per 10K`,
+  bins = bins
+)
+
+shared_leaf_map <- shared_cty %>% 
+  leaflet() %>% 
+  setView(-96, 37.8, 5) %>% 
+  addProviderTiles(provider = "CartoDB.Positron") %>%
+  addPolygons(label = lapply(labels_v2, htmltools::HTML),
+    fillColor = ~pal(cases_counties_final$`Confirmed Cases per 10K`),
+    stroke = TRUE,
+    fillOpacity = 0.7,
+    weight = 0.4) %>% 
+    addLegend("bottomright",
+    pal = pal,
+    values = ~ `Confirmed Cases per 10K`,
+    title = "Confirmed Cases per 10K",
+    opacity = 1)
+
+# cty_leaflet <- tmap_leaflet(cty_map)
 ```
 
-Cases By County
+Per Capita Cases By County
 =============================================================
 
-Sidebar1 {.sidebar}
------------------------------------------------------------------------
+<!-- Sidebar1 {.sidebar} -->
+<!-- ----------------------------------------------------------------------- -->
 
-```{r}
-filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", shared_cty_map, ~`Percent Population 65 and Above`)
-```
+<!-- ```{r} -->
+<!-- # filter_slider("prop_65_above", "Percent Population 65 and Above", shared_cty, ~prop_65_above, round = 1) -->
+<!-- ``` -->
 
-### Map
+<!-- Column -->
+<!-- ----------------------------------------------------------------------- -->
+
+###
 
 ```{r map, message=FALSE, warning=FALSE}
 
-shared_cty_map
+shared_leaf_map
+
+# cty_leaflet
 
 # tmap_save(cty_map, filename = 'county_map_test_v2.html')
 
@@ -122,3 +169,4 @@ shared_cty_map
 # 
 # cty_layers
 ```
+> Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)
