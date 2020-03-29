@@ -197,6 +197,7 @@ shared_leaf_map
 # 
 # cty_layers
 ```
+
 Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)
 
 Social Risk Factors
@@ -209,6 +210,8 @@ df_no_geom <- st_drop_geometry(condensed_df)
 df_no_geom <- df_no_geom %>% 
   mutate_if(is.numeric, round, digits = 2)
 
+# summary(df_no_geom)
+
 counties_table <- SharedData$new(df_no_geom)
 
 html_table <- datatable(counties_table, rownames = FALSE, style="bootstrap", class="compact", width="100%", options=list(order = list(15, 'desc'), pageLength = 15))
@@ -219,8 +222,20 @@ Sidebar2 {.sidebar}
 -----------------------------------------------------------------------
 
 ```{r}
-filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, round = 1)
-filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, round = 1)
+filter_slider("Confirmed Cases per 10K", "Confirmed Cases per 10K", counties_table, column=~`Confirmed Cases per 10K`, min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]], round = 1)
+
+filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, min = summary(df_no_geom$`Percent Population 65 and Above`)[[2]], round = 1)
+
+filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, max = summary(df_no_geom$`Hospital Beds per 1K`)[[5]], round = 1)
+
+filter_slider("Percent Without Insurance (Under 65)", "Percent Without Insurance (Under 65)", counties_table, column=~`Percent Without Insurance (Under 65)`, min = summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[2]], round = 1)
+
+filter_slider("Primary Care Physicians per 100K", "Primary Care Physicians per 100K", counties_table, column=~`Primary Care Physicians per 100K`, max = summary(df_no_geom$`Primary Care Physicians per 100K`)[[5]], round = 1)
+
+# names(df_no_geom)
+# 
+# summary(df_no_geom$`Percent Population 65 and Above`)[[2]]
+# summary(df_no_geom$`Hospital Beds per 1K`)[[5]]
 ```
 
 Column
