@@ -16,6 +16,7 @@ library(tmap)
 library(sf)
 library(leaflet)
 library(crosstalk)
+library(DT)
 library(tmaptools)
 tmap_mode('view')
 ```
@@ -79,6 +80,44 @@ cases_health_counties <- cases_health_counties %>%
   mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B27010_001 / 100000))
 ```
 
+```{r}
+# hosp_16 <- read_csv('hosp16_atlas.csv')
+# 
+# beds_by_county <- hosp_16 %>% 
+#   group_by(FCOUNTY) %>% 
+#   summarize(hospital_beds = sum(AHAbeds, na.rm = TRUE))
+
+hifld_hosp <- read_csv('../HIFLD_Hospitals.csv')
+
+hifld_hosp$BEDS[hifld_hosp$BEDS== -999] <- 0
+
+hifld_beds_by_county <- hifld_hosp %>%
+  group_by(COUNTYFIPS) %>% 
+  summarize(hospital_beds = sum(BEDS, na.rm = TRUE))
+
+# beds_merge <- merge(beds_by_county, hifld_beds_by_county, by.x = 'FCOUNTY', by.y = 'COUNTYFIPS')
+# 
+# cor.test(beds_merge$hospital_beds.x, beds_merge$hospital_beds.y)
+
+w_hosp_merge <- merge(cases_health_counties, hifld_beds_by_county, by.x = 'Geo_FIPS', by.y = 'COUNTYFIPS', all.x = T)
+
+# names(w_hosp_merge)
+# 
+# summary(w_hosp_merge$hospital_beds)
+
+w_hosp_merge$hospital_beds[is.na(w_hosp_merge$hospital_beds)] <- 0
+
+condensed_df <- w_hosp_merge %>% 
+  select(1, 7, 15, 3, 5, 11, 12, 13, 20, 21, 22, 23, 25, 26, 27, 28) %>% 
+  rename('Total Population' = 'B27010_001',
+         'State' = 'Province_State',
+         'Hospital Beds' = 'hospital_beds') %>% 
+  mutate('Percent Population 65 and Above' = prop_65_above_acs_2018 * 100,
+         'Hospital Beds per 1K' = `Hospital Beds` / (`Total Population` / 1000)) %>% 
+  select(-prop_65_above_acs_2018) %>% 
+  select(1, 2, 3, 4, 15, 8, 12, 14, 16, 5, 6, 7, 9, 10, 11, 13, 17)
+```
+
 ```{r reproject and use with crosswalk}
 
 cases_counties_final <- set_projection(cases_health_counties, projection = 'longlat')
@@ -104,9 +143,8 @@ shared_cty <- SharedData$new(cases_counties_final)
 labels <- paste0(shared_cty$data()$Geo_NAME, "<br/>", "Confirmed Cases per 10K: ", round(shared_cty$data()$`Confirmed Cases per 10K`, 1))
 
 labels_v2 <- sprintf(
-  "<strong>%s</strong><br/>Confirmed Cases per 10K: %g",
-  shared_cty$data()$Geo_NAME, round(shared_cty$data()$`Confirmed Cases per 10K`, 1)
-)
+  "<strong>%s</strong><br/>Confirmed Cases: %g<br/>Confirmed Cases per 10K: %g",
+  shared_cty$data()$Geo_NAME, shared_cty$data()$`Confirmed Cases`, round(shared_cty$data()$`Confirmed Cases per 10K`, 1))
 
 bins <- c(0, 1.25, 5, 20, 60, 135)
 
@@ -137,16 +175,6 @@ shared_leaf_map <- shared_cty %>%
 Per Capita Cases By County
 =============================================================
 
-<!-- Sidebar1 {.sidebar} -->
-<!-- ----------------------------------------------------------------------- -->
-
-<!-- ```{r} -->
-<!-- # filter_slider("prop_65_above", "Percent Population 65 and Above", shared_cty, ~prop_65_above, round = 1) -->
-<!-- ``` -->
-
-<!-- Column -->
-<!-- ----------------------------------------------------------------------- -->
-
 ###
 
 ```{r map, message=FALSE, warning=FALSE}
@@ -169,4 +197,39 @@ shared_leaf_map
 # 
 # cty_layers
 ```
-> Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)
+Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)
+
+Social Risk Factors
+===========================================================
+
+```{r}
+
+df_no_geom <- st_drop_geometry(condensed_df)
+
+df_no_geom <- df_no_geom %>% 
+  mutate_if(is.numeric, round, digits = 2)
+
+counties_table <- SharedData$new(df_no_geom)
+
+html_table <- datatable(counties_table, rownames = FALSE, style="bootstrap", class="compact", width="100%", options=list(order = list(15, 'desc'), pageLength = 15))
+```
+
+
+Sidebar2 {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, round = 1)
+filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, round = 1)
+```
+
+Column
+-----------------
+
+### 
+
+```{r}
+html_table
+```
+
+> Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/), [County Health Rankings](https://www.countyhealthrankings.org/), [Homeland Infrastructure Foundation-Level Data](https://hifld-geoplatform.opendata.arcgis.com/datasets/6ac5e325468c4cb9b905f1728d6fbf0f_0)
