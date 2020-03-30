@@ -201,7 +201,7 @@ shared_leaf_map
 
 > Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)
 
-Social Risk Factors
+Social Risk Factors By County
 ===========================================================
 
 ```{r}
