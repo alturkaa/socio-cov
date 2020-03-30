@@ -18,6 +18,7 @@ library(leaflet)
 library(crosstalk)
 library(DT)
 library(tmaptools)
+library(summarywidget)
 tmap_mode('view')
 ```
 
@@ -175,7 +176,7 @@ shared_leaf_map <- shared_cty %>%
 Per Capita Cases By County
 =============================================================
 
-###
+### Data Updated as of `r format(Sys.Date()-1, "%B %d %Y")`
 
 ```{r map, message=FALSE, warning=FALSE}
 
@@ -198,7 +199,7 @@ shared_leaf_map
 # cty_layers
 ```
 
-Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)
+> Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)
 
 Social Risk Factors
 ===========================================================
@@ -210,7 +211,22 @@ df_no_geom <- st_drop_geometry(condensed_df)
 df_no_geom <- df_no_geom %>% 
   mutate_if(is.numeric, round, digits = 2)
 
-# summary(df_no_geom)
+cases_median <- summary(df_no_geom$`Confirmed Cases per 10K`)[[3]]
+cases_p75 <- summary(df_no_geom$`Confirmed Cases per 10K`)[[5]]
+
+prop_65_median <- summary(df_no_geom$`Percent Population 65 and Above`)[[3]]
+prop_65_p75 <- summary(df_no_geom$`Percent Population 65 and Above`)[[5]]
+
+beds_p25 <- summary(df_no_geom$`Hospital Beds per 1K`)[[2]]
+beds_median <- summary(df_no_geom$`Hospital Beds per 1K`)[[3]]
+
+uninsured_median <- summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[3]]
+uninsured_p75 <- summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[5]]
+
+pcp_p25 <- summary(df_no_geom$`Primary Care Physicians per 100K`)[[2]]
+pcp_median <- summary(df_no_geom$`Primary Care Physicians per 100K`)[[3]]
+
+# summary(df_no_geom$`Primary Care Physicians per 100K`)
 
 counties_table <- SharedData$new(df_no_geom)
 
@@ -220,23 +236,46 @@ html_table <- datatable(counties_table, rownames = FALSE, style="bootstrap", cla
 
 Sidebar2 {.sidebar}
 -----------------------------------------------------------------------
+Use the **sliders** below to filter the table to the right.
 
 ```{r}
 filter_slider("Confirmed Cases per 10K", "Confirmed Cases per 10K", counties_table, column=~`Confirmed Cases per 10K`, min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]], round = 1)
-
-filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, min = summary(df_no_geom$`Percent Population 65 and Above`)[[2]], round = 1)
-
-filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, max = summary(df_no_geom$`Hospital Beds per 1K`)[[5]], round = 1)
-
-filter_slider("Percent Without Insurance (Under 65)", "Percent Without Insurance (Under 65)", counties_table, column=~`Percent Without Insurance (Under 65)`, min = summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[2]], round = 1)
-
-filter_slider("Primary Care Physicians per 100K", "Primary Care Physicians per 100K", counties_table, column=~`Primary Care Physicians per 100K`, max = summary(df_no_geom$`Primary Care Physicians per 100K`)[[5]], round = 1)
-
-# names(df_no_geom)
-# 
-# summary(df_no_geom$`Percent Population 65 and Above`)[[2]]
-# summary(df_no_geom$`Hospital Beds per 1K`)[[5]]
 ```
+
+**Median:** `r round(cases_median, 1)`</br>
+**75th Percentile:** `r round(cases_p75, 1)`
+
+```{r}
+filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, min = summary(df_no_geom$`Percent Population 65 and Above`)[[2]], round = 1)
+```
+
+**Median:** `r round(prop_65_median, 1)`</br>
+**75th Percentile:** `r round(prop_65_p75, 1)`
+
+```{r}
+filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, max = summary(df_no_geom$`Hospital Beds per 1K`)[[5]], round = 1)
+```
+
+**25th Percentile:** `r round(beds_p25, 1)`</br>
+**Median:** `r round(beds_median, 1)`
+
+```{r}
+filter_slider("Percent Without Insurance (Under 65)", "Percent Without Insurance (Under 65)", counties_table, column=~`Percent Without Insurance (Under 65)`, min = summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[2]], round = 1)
+```
+
+**Median:** `r round(uninsured_median, 1)`</br>
+**75th Percentile:** `r round(uninsured_p75, 1)`
+
+```{r}
+filter_slider("Primary Care Physicians per 100K", "Primary Care Physicians per 100K", counties_table, column=~`Primary Care Physicians per 100K`, max = summary(df_no_geom$`Primary Care Physicians per 100K`)[[5]], round = 1)
+```
+
+**25th Percentile:** `r round(pcp_p25, 1)`</br>
+**Median:** `r round(pcp_median, 1)`
+<!-- # names(df_no_geom) -->
+<!-- # -->
+<!-- # summary(df_no_geom$`Percent Population 65 and Above`)[[2]] -->
+<!-- # summary(df_no_geom$`Hospital Beds per 1K`)[[5]] -->
 
 Column
 -----------------
