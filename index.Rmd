@@ -11,15 +11,23 @@ output:
 ```{r packages, include=FALSE}
 library(tidyverse)
 library(tidycensus)
-library(mapview)
-library(tmap)
+# library(mapview)
+# library(tmap)
 library(sf)
 library(leaflet)
 library(crosstalk)
 library(DT)
 library(tmaptools)
-library(summarywidget)
-tmap_mode('view')
+# library(summarywidget)
+library(reticulate)
+# tmap_mode('view')
+```
+
+```{python get date in right format for USA Facts data}
+from datetime import date, timedelta
+
+yesterday = date.today() - timedelta(days=1)
+yesterday_usa_facts_format = yesterday.strftime('%#m/%d/%Y')
 ```
 
 ```{r get census data with shapefiles}
@@ -59,26 +67,80 @@ health_condense <- health_rank_full %>%
 
 health_counties <- merge(counties, health_condense, by = 'Geo_FIPS')
 ```
+
+```{python}
+import pandas as pd
+
+# USA Facts cases data and df
+usa_facts_cases_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_confirmed_usafacts.csv', dtype={'countyFIPS' : str})
+
+# USA Facts deaths data and df
+usa_facts_deaths_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_deaths_usafacts.csv', dtype={'countyFIPS' : str})
+
+# function to add leading zeros to FIPS
+def add_leading_zero(text):
+  if len(text) == 4:
+    return '0' + text
+  else:
+    return text
+
+usa_facts_cases_df['Geo_FIPS'] = usa_facts_cases_df['countyFIPS'].apply(add_leading_zero)
+
+usa_facts_deaths_df['Geo_FIPS'] = usa_facts_deaths_df['countyFIPS'].apply(add_leading_zero)
+```
+
+
 ```{r import cases data and merge, message=FALSE, warning=FALSE}
 
-yesterday <- format(Sys.Date()-1, "%m-%d-%Y")
+# yesterday_jhhe_format <- format(Sys.Date()-1, "%m-%d-%Y")
 
-cases_url <- paste0('https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/', yesterday, '.csv')
+# yest_usa_facts_format <- strftime(as.Date(Sys.Date()-1, "%m/%d/%Y"), format = "%#m/%d/%Y")
 
-cumulative_cases_yesterday <- read_csv(cases_url)
+# # JHHE data
+# cases_url <- paste0('https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/', yesterday_jhhe_format, '.csv')
+# 
+# # JHHE df
+# cumulative_cases_yesterday <- read_csv(cases_url)
+# 
+# # JHHE US cases
+# us_cases <- cumulative_cases_yesterday %>% 
+#   filter(Country_Region == 'US') %>% 
+#   rename('Geo_FIPS' = 'FIPS',
+#          'Confirmed Cases' = 'Confirmed')
 
-us_cases <- cumulative_cases_yesterday %>% 
-  filter(Country_Region == 'US') %>% 
-  rename('Geo_FIPS' = 'FIPS',
-         'Confirmed Cases' = 'Confirmed')
+usa_facts_cases <- py$usa_facts_cases_df %>% 
+  select(Geo_FIPS, `County Name`, State, py$yesterday_usa_facts_format) %>% 
+  rename('Confirmed Cases' = py$yesterday_usa_facts_format) %>% 
+  filter(!is.na(`Confirmed Cases`)) %>% # filter out NAs, which in this df are duplicates, not missing data
+  filter(Geo_FIPS != '0') 
+
+usa_facts_deaths <- py$usa_facts_deaths_df %>% 
+  select(Geo_FIPS, `County Name`, State, py$yesterday_usa_facts_format) %>% 
+  rename('Deaths' = py$yesterday_usa_facts_format) %>% 
+  filter(!is.na(Deaths)) %>% # filter out NAs, which in this df are duplicates, not missing data
+  filter(Geo_FIPS != '0') 
+
+usa_facts_merge = merge(usa_facts_cases, usa_facts_deaths, by = c('Geo_FIPS', 'State'))
 
 # length(unique(us_cases$Geo_FIPS))
 
-cases_health_counties <- merge(health_counties, us_cases, by = 'Geo_FIPS')
+# test_merge = merge(us_cases, usa_facts_cases, by = 'Geo_FIPS')
+
+# With JHHE data
+# cases_health_counties <- merge(health_counties, us_cases, by = 'Geo_FIPS')
+# 
+# cases_health_counties <- cases_health_counties %>% 
+#   mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (B27010_001 / 10000)) %>% 
+#   mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B27010_001 / 100000))
+
+# With USA Facts data
+cases_health_counties <- merge(health_counties, usa_facts_merge, by = 'Geo_FIPS')
 
 cases_health_counties <- cases_health_counties %>% 
   mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (B27010_001 / 10000)) %>% 
-  mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B27010_001 / 100000))
+  mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B27010_001 / 100000)) %>%
+  mutate('Deaths per 10K' = Deaths / (B27010_001 / 10000)) %>% 
+  mutate('Deaths per 100K' = Deaths / (B27010_001 / 100000))
 ```
 
 ```{r}
@@ -108,20 +170,24 @@ w_hosp_merge <- merge(cases_health_counties, hifld_beds_by_county, by.x = 'Geo_F
 
 w_hosp_merge$hospital_beds[is.na(w_hosp_merge$hospital_beds)] <- 0
 
+# names(w_hosp_merge)
+
 condensed_df <- w_hosp_merge %>% 
-  select(1, 7, 15, 3, 5, 11, 12, 13, 20, 21, 22, 23, 25, 26, 27, 28) %>% 
+  select(Geo_FIPS, Geo_NAME, State, B27010_001, prop_65_above_acs_2018, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, hospital_beds, geometry) %>% 
   rename('Total Population' = 'B27010_001',
-         'State' = 'Province_State',
          'Hospital Beds' = 'hospital_beds') %>% 
   mutate('Percent Population 65 and Above' = prop_65_above_acs_2018 * 100,
          'Hospital Beds per 1K' = `Hospital Beds` / (`Total Population` / 1000)) %>% 
   select(-prop_65_above_acs_2018) %>% 
-  select(1, 2, 3, 4, 15, 8, 12, 14, 16, 5, 6, 7, 9, 10, 11, 13, 17)
+  select(Geo_FIPS, Geo_NAME, State, `Total Population`, `Percent Population 65 and Above`, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, `Hospital Beds`, `Hospital Beds per 1K`, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, geometry)
 ```
 
 ```{r reproject and use with crosswalk}
 
-cases_counties_final <- set_projection(cases_health_counties, projection = 'longlat')
+cases_counties_final <- set_projection(condensed_df, projection = 'longlat')
+
+# condensed_df <- condensed_df %>% 
+#   as('Spatial')
 
 # st_crs(shape_reproj)
 
@@ -137,30 +203,31 @@ shared_cty <- SharedData$new(cases_counties_final)
 #     title.size = 1,
 #     title.position = c("center", "top"))
 
-# classInt::classIntervals(cases_counties_final$`Confirmed Cases per 10K`, n = 5, style = 'jenks')
+jenks_bins <- classInt::classIntervals(condensed_df$`Confirmed Cases per 10K`, n = 5, style = 'jenks')
 
 # cty_map <- st_transform(cty_map, crs = 4326)
 
-labels <- paste0(shared_cty$data()$Geo_NAME, "<br/>", "Confirmed Cases per 10K: ", round(shared_cty$data()$`Confirmed Cases per 10K`, 1))
+# labels <- paste0(shared_cty$data()$Geo_NAME, "<br/>", "Confirmed Cases per 10K: ", round(shared_cty$data()$`Confirmed Cases per 10K`, 1))
 
 labels_v2 <- sprintf(
   "<strong>%s</strong><br/>Confirmed Cases: %g<br/>Confirmed Cases per 10K: %g",
   shared_cty$data()$Geo_NAME, shared_cty$data()$`Confirmed Cases`, round(shared_cty$data()$`Confirmed Cases per 10K`, 1))
 
-bins <- c(0, 1.25, 5, 20, 60, 135)
+bins <- round(jenks_bins$brks, 2)
 
 pal <- colorBin(
   palette = "YlGnBu",
-  domain = cases_counties_final$`Confirmed Cases per 10K`,
+  domain = condensed_df$`Confirmed Cases per 10K`,
   bins = bins
 )
 
 shared_leaf_map <- shared_cty %>% 
   leaflet() %>% 
   setView(-96, 37.8, 5) %>% 
-  addProviderTiles(provider = "CartoDB.Positron") %>%
-  addPolygons(label = lapply(labels_v2, htmltools::HTML),
-    fillColor = ~pal(cases_counties_final$`Confirmed Cases per 10K`),
+  addProviderTiles(provider = "CartoDB.Positron", group = 'Base') %>%
+  addPolygons(group = 'Counties', 
+              label = lapply(labels_v2, htmltools::HTML),
+    fillColor = ~pal(condensed_df$`Confirmed Cases per 10K`),
     stroke = TRUE,
     fillOpacity = 0.7,
     weight = 0.4) %>% 
@@ -168,7 +235,12 @@ shared_leaf_map <- shared_cty %>%
     pal = pal,
     values = ~ `Confirmed Cases per 10K`,
     title = "Confirmed Cases per 10K",
-    opacity = 1)
+    opacity = 1) %>% 
+  addLayersControl(
+        baseGroups = 'Base',
+        overlayGroups = 'Counties',
+        options = layersControlOptions(collapsed = TRUE)
+      )
 
 # cty_leaflet <- tmap_leaflet(cty_map)
 ```
@@ -176,7 +248,7 @@ shared_leaf_map <- shared_cty %>%
 Per Capita Cases By County
 =============================================================
 
-### Data Updated as of `r format(Sys.Date()-1, "%B %d %Y")`
+### Data Updated as of `r format(Sys.Date()-1, "%B %d, %Y")`
 
 ```{r map, message=FALSE, warning=FALSE}
 
@@ -199,7 +271,8 @@ shared_leaf_map
 # cty_layers
 ```
 
-> Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)
+> Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)</br>
+> Note: Does not include cases not assigned to counties.
 
 Social Risk Factors By County
 ===========================================================
@@ -230,7 +303,7 @@ pcp_median <- summary(df_no_geom$`Primary Care Physicians per 100K`)[[3]]
 
 counties_table <- SharedData$new(df_no_geom)
 
-html_table <- datatable(counties_table, rownames = FALSE, style="bootstrap", class="compact", width="100%", options=list(order = list(15, 'desc'), pageLength = 15))
+html_table <- datatable(counties_table, rownames = FALSE, style="bootstrap", class="compact", width="100%", options=list(order = list(7, "desc"), pageLength = 15))
 ```
 
 
@@ -239,35 +312,40 @@ Sidebar2 {.sidebar}
 Use the **sliders** below to filter the table to the right.
 
 ```{r}
-filter_slider("Confirmed Cases per 10K", "Confirmed Cases per 10K", counties_table, column=~`Confirmed Cases per 10K`, min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]], round = 1)
+filter_slider("Confirmed Cases per 10K", "Confirmed Cases per 10K", counties_table, column=~`Confirmed Cases per 10K`, round = 1)
+# min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]],
 ```
 
 **Median:** `r round(cases_median, 1)`</br>
 **75th Percentile:** `r round(cases_p75, 1)`
 
 ```{r}
-filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, min = summary(df_no_geom$`Percent Population 65 and Above`)[[2]], round = 1)
+filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, round = 1)
+# min = summary(df_no_geom$`Percent Population 65 and Above`)[[2]],
 ```
 
 **Median:** `r round(prop_65_median, 1)`</br>
 **75th Percentile:** `r round(prop_65_p75, 1)`
 
 ```{r}
-filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, max = summary(df_no_geom$`Hospital Beds per 1K`)[[5]], round = 1)
+filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, round = 1)
+# max = summary(df_no_geom$`Hospital Beds per 1K`)[[5]],
 ```
 
 **25th Percentile:** `r round(beds_p25, 1)`</br>
 **Median:** `r round(beds_median, 1)`
 
 ```{r}
-filter_slider("Percent Without Insurance (Under 65)", "Percent Without Insurance (Under 65)", counties_table, column=~`Percent Without Insurance (Under 65)`, min = summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[2]], round = 1)
+filter_slider("Percent Without Insurance (Under 65)", "Percent Without Insurance (Under 65)", counties_table, column=~`Percent Without Insurance (Under 65)`, round = 1)
+# min = summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[2]],
 ```
 
 **Median:** `r round(uninsured_median, 1)`</br>
 **75th Percentile:** `r round(uninsured_p75, 1)`
 
 ```{r}
-filter_slider("Primary Care Physicians per 100K", "Primary Care Physicians per 100K", counties_table, column=~`Primary Care Physicians per 100K`, max = summary(df_no_geom$`Primary Care Physicians per 100K`)[[5]], round = 1)
+filter_slider("Primary Care Physicians per 100K", "Primary Care Physicians per 100K", counties_table, column=~`Primary Care Physicians per 100K`, round = 1)
+# max = summary(df_no_geom$`Primary Care Physicians per 100K`)[[5]],
 ```
 
 **25th Percentile:** `r round(pcp_p25, 1)`</br>
@@ -286,4 +364,18 @@ Column
 html_table
 ```
 
-> Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/), [County Health Rankings](https://www.countyhealthrankings.org/), [Homeland Infrastructure Foundation-Level Data](https://hifld-geoplatform.opendata.arcgis.com/datasets/6ac5e325468c4cb9b905f1728d6fbf0f_0)
+> Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/), [County Health Rankings](https://www.countyhealthrankings.org/), [Homeland Infrastructure Foundation-Level Data](https://hifld-geoplatform.opendata.arcgis.com/datasets/6ac5e325468c4cb9b905f1728d6fbf0f_0)</br>
+> Note: Does not include cases not assigned to counties.
+
+Growth Rates By County
+===========================================================
+
+Coming soon.
+
+Economic Consequences
+===========================================================
+
+Coming soon.
+
+About
+===========================================================
