@@ -16,8 +16,10 @@ library(tidycensus)
 library(sf)
 library(leaflet)
 library(crosstalk)
+library(plotly)
 library(DT)
 library(tmaptools)
+library(zoo)
 # library(summarywidget)
 library(reticulate)
 # tmap_mode('view')
@@ -27,7 +29,7 @@ library(reticulate)
 from datetime import date, timedelta
 
 yesterday = date.today() - timedelta(days=1)
-yesterday_usa_facts_format = yesterday.strftime('%#m/%d/%Y')
+yesterday_usa_facts_format = yesterday.strftime('%m/%d/%Y')
 ```
 
 ```{r get census data with shapefiles}
@@ -74,8 +76,14 @@ import pandas as pd
 # USA Facts cases data and df
 usa_facts_cases_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_confirmed_usafacts.csv', dtype={'countyFIPS' : str})
 
+usa_facts_cases_df.columns = usa_facts_cases_df.columns[:4].tolist() + pd.to_datetime(usa_facts_cases_df.columns[4:]).strftime('%m/%d/%Y').tolist()
+
+# usa_facts_cases_df.dtypes
+
 # USA Facts deaths data and df
 usa_facts_deaths_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_deaths_usafacts.csv', dtype={'countyFIPS' : str})
+
+usa_facts_deaths_df.columns = usa_facts_deaths_df.columns[:4].tolist() + pd.to_datetime(usa_facts_deaths_df.columns[4:]).strftime('%m/%d/%Y').tolist()
 
 # function to add leading zeros to FIPS
 def add_leading_zero(text):
@@ -84,7 +92,7 @@ def add_leading_zero(text):
   else:
     return text
 
-usa_facts_cases_df['Geo_FIPS'] = usa_facts_cases_df['countyFIPS'].apply(add_leading_zero)
+usa_facts_cases_df['Geo_FIPS'] = usa_facts_cases_df['countyFIPS'].apply(add_leading_zero) 
 
 usa_facts_deaths_df['Geo_FIPS'] = usa_facts_deaths_df['countyFIPS'].apply(add_leading_zero)
 ```
@@ -108,6 +116,61 @@ usa_facts_deaths_df['Geo_FIPS'] = usa_facts_deaths_df['countyFIPS'].apply(add_le
 #   rename('Geo_FIPS' = 'FIPS',
 #          'Confirmed Cases' = 'Confirmed')
 
+# names(py$usa_facts_deaths_df)
+
+usa_facts_for_time_series <- py$usa_facts_cases_df %>% 
+  filter(Geo_FIPS != '0') %>% 
+  select(Geo_FIPS, '01/22/2020':py$yesterday_usa_facts_format)
+
+counties_for_ts_merge <- st_drop_geometry(counties) %>% 
+  select(Geo_FIPS)
+
+counties_ts <- merge(usa_facts_for_time_series, counties_for_ts_merge, by = 'Geo_FIPS')
+
+# names(py$usa_facts_cases_df)
+
+cases_long <- counties_ts %>% 
+  pivot_longer(cols = '01/22/2020':py$yesterday_usa_facts_format, names_to = 'Date', values_to = 'Confirmed Cases') %>% 
+  arrange(Geo_FIPS, Date)
+
+cases_long_growth <- cases_long %>% 
+  group_by(Geo_FIPS) %>%
+  mutate(pct_change = ((`Confirmed Cases` - lag(`Confirmed Cases`)) / lag(`Confirmed Cases`)) * 100) %>% 
+  mutate_if(is.numeric, list(~na_if(., Inf)))
+
+cases_long_growth$pct_change[cases_long_growth$pct_change == 'NaN'] <- NA
+
+cases_long_growth <- cases_long_growth %>%
+  mutate(moving_average = rollmean(pct_change, 7, align='right', fill=NA))
+
+# cases_growth_no_missing <- cases_long_growth %>% 
+#   filter(!is.na(moving_average))
+
+just_yest <- cases_long_growth %>% 
+  filter(Date == py$yesterday_usa_facts_format)
+
+# just_yest_no_missing <- just_yest %>% 
+#   filter(!is.na(moving_average))
+
+# summary(just_yest$moving_average)
+
+# just_yest_no_missing_above_median <- just_yest_no_missing %>% 
+#   filter(moving_average > median(just_yest_no_missing$moving_average),
+#          `Confirmed Cases per 10K` > median(just_yest$`Confirmed Cases per 10K`))
+
+# just_yest$per_capita_scaled <- scale(just_yest$`Confirmed Cases per 10K`)
+# just_yest$growth_scaled <- scale(just_yest$moving_average)
+
+# prev_growth_above_median <- merge(cases_growth_no_missing, just_yest_no_missing_above_median, by = 'Geo_FIPS')
+
+# length(unique(prev_growth_above_median$Geo_FIPS))
+
+# ggplot(prev_growth_above_median) +
+#   geom_line(mapping = aes(x = `Confirmed Cases per 10K.x`, y = moving_average.x, color = Geo_FIPS)) +
+#   scale_x_log10() +
+#   scale_y_log10() +
+#   theme(legend.position = "none")
+
 usa_facts_cases <- py$usa_facts_cases_df %>% 
   select(Geo_FIPS, `County Name`, State, py$yesterday_usa_facts_format) %>% 
   rename('Confirmed Cases' = py$yesterday_usa_facts_format) %>% 
@@ -122,6 +185,8 @@ usa_facts_deaths <- py$usa_facts_deaths_df %>%
 
 usa_facts_merge = merge(usa_facts_cases, usa_facts_deaths, by = c('Geo_FIPS', 'State'))
 
+counties_w_growth_rates = merge(usa_facts_merge, just_yest, by = c('Geo_FIPS', 'Confirmed Cases'))
+
 # length(unique(us_cases$Geo_FIPS))
 
 # test_merge = merge(us_cases, usa_facts_cases, by = 'Geo_FIPS')
@@ -134,7 +199,7 @@ usa_facts_merge = merge(usa_facts_cases, usa_facts_deaths, by = c('Geo_FIPS', 'S
 #   mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B27010_001 / 100000))
 
 # With USA Facts data
-cases_health_counties <- merge(health_counties, usa_facts_merge, by = 'Geo_FIPS')
+cases_health_counties <- merge(health_counties, counties_w_growth_rates, by = 'Geo_FIPS')
 
 cases_health_counties <- cases_health_counties %>% 
   mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (B27010_001 / 10000)) %>% 
@@ -173,13 +238,18 @@ w_hosp_merge$hospital_beds[is.na(w_hosp_merge$hospital_beds)] <- 0
 # names(w_hosp_merge)
 
 condensed_df <- w_hosp_merge %>% 
-  select(Geo_FIPS, Geo_NAME, State, B27010_001, prop_65_above_acs_2018, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, hospital_beds, geometry) %>% 
+  select(Geo_FIPS, Geo_NAME, State, B27010_001, prop_65_above_acs_2018, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Confirmed Cases`, Deaths, moving_average, `Confirmed Cases per 10K`, `Deaths per 10K`, hospital_beds, geometry) %>% 
   rename('Total Population' = 'B27010_001',
-         'Hospital Beds' = 'hospital_beds') %>% 
+         'Hospital Beds' = 'hospital_beds',
+         'Average Daily Percent Change (Past 7 Days)' = 'moving_average') %>% 
   mutate('Percent Population 65 and Above' = prop_65_above_acs_2018 * 100,
-         'Hospital Beds per 1K' = `Hospital Beds` / (`Total Population` / 1000)) %>% 
-  select(-prop_65_above_acs_2018) %>% 
-  select(Geo_FIPS, Geo_NAME, State, `Total Population`, `Percent Population 65 and Above`, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, `Hospital Beds`, `Hospital Beds per 1K`, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, geometry)
+         'Hospital Beds per 1K' = `Hospital Beds` / (`Total Population` / 1000),
+         'Per Capita Cases Above Median' = ifelse(`Confirmed Cases per 10K` > median(w_hosp_merge$`Confirmed Cases per 10K`), 'Yes', 'No'), 
+         'Average Growth Rate Above Median' = ifelse(
+           `Average Daily Percent Change (Past 7 Days)` > summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'Yes', 
+           ifelse(
+             `Average Daily Percent Change (Past 7 Days)` <= summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'No', NA))) %>% 
+  select(Geo_FIPS, Geo_NAME, State, `Total Population`, `Percent Population 65 and Above`, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Average Daily Percent Change (Past 7 Days)`, `Deaths per 10K`, `Hospital Beds`, `Hospital Beds per 1K`, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Per Capita Cases Above Median`, `Average Growth Rate Above Median`, geometry)
 ```
 
 ```{r reproject and use with crosswalk}
@@ -287,6 +357,11 @@ df_no_geom <- df_no_geom %>%
 cases_median <- summary(df_no_geom$`Confirmed Cases per 10K`)[[3]]
 cases_p75 <- summary(df_no_geom$`Confirmed Cases per 10K`)[[5]]
 
+growth_median <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[3]]
+growth_p75 <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[5]]
+
+growth_median
+
 prop_65_median <- summary(df_no_geom$`Percent Population 65 and Above`)[[3]]
 prop_65_p75 <- summary(df_no_geom$`Percent Population 65 and Above`)[[5]]
 
@@ -307,49 +382,58 @@ html_table <- datatable(counties_table, rownames = FALSE, style="bootstrap", cla
 ```
 
 
-Sidebar2 {.sidebar}
+Filters {.sidebar}
 -----------------------------------------------------------------------
-Use the **sliders** below to filter the table to the right.
+Use **sliders** and **checkboxes** to filter table and the figure on the next page. Refresh your browser to restart filtering.
 
 ```{r}
-filter_slider("Confirmed Cases per 10K", "Confirmed Cases per 10K", counties_table, column=~`Confirmed Cases per 10K`, round = 1)
+# filter_slider("Confirmed Cases per 10K", "Confirmed Cases per 10K", counties_table, column=~`Confirmed Cases per 10K`, round = 1)
+filter_checkbox("Per Capita Cases Above Median", "Per Capita Cases Above Median?", counties_table, ~`Per Capita Cases Above Median`, inline = TRUE)
 # min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]],
 ```
 
-**Median:** `r round(cases_median, 1)`</br>
-**75th Percentile:** `r round(cases_p75, 1)`
+**Median:** `r round(cases_median, 2)`</br>
+**75th Percentile:** `r round(cases_p75, 2)`
+
+```{r}
+filter_checkbox("Average Growth Rate Above Median", "Average Daily Percent Change (Past Week) Above Median?", counties_table, ~`Average Growth Rate Above Median`, inline = TRUE)
+# min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]],
+```
+
+**Median:** `r round(growth_median, 2)`</br>
+**75th Percentile:** `r round(growth_p75, 2)`
 
 ```{r}
 filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, round = 1)
 # min = summary(df_no_geom$`Percent Population 65 and Above`)[[2]],
 ```
 
-**Median:** `r round(prop_65_median, 1)`</br>
-**75th Percentile:** `r round(prop_65_p75, 1)`
+**Median:** `r round(prop_65_median, 2)`</br>
+**75th Percentile:** `r round(prop_65_p75, 2)`
 
 ```{r}
 filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, round = 1)
 # max = summary(df_no_geom$`Hospital Beds per 1K`)[[5]],
 ```
 
-**25th Percentile:** `r round(beds_p25, 1)`</br>
-**Median:** `r round(beds_median, 1)`
+**25th Percentile:** `r round(beds_p25, 2)`</br>
+**Median:** `r round(beds_median, 2)`
 
 ```{r}
 filter_slider("Percent Without Insurance (Under 65)", "Percent Without Insurance (Under 65)", counties_table, column=~`Percent Without Insurance (Under 65)`, round = 1)
 # min = summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[2]],
 ```
 
-**Median:** `r round(uninsured_median, 1)`</br>
-**75th Percentile:** `r round(uninsured_p75, 1)`
+**Median:** `r round(uninsured_median, 2)`</br>
+**75th Percentile:** `r round(uninsured_p75, 2)`
 
 ```{r}
 filter_slider("Primary Care Physicians per 100K", "Primary Care Physicians per 100K", counties_table, column=~`Primary Care Physicians per 100K`, round = 1)
 # max = summary(df_no_geom$`Primary Care Physicians per 100K`)[[5]],
 ```
 
-**25th Percentile:** `r round(pcp_p25, 1)`</br>
-**Median:** `r round(pcp_median, 1)`
+**25th Percentile:** `r round(pcp_p25, 2)`</br>
+**Median:** `r round(pcp_median, 2)`
 <!-- # names(df_no_geom) -->
 <!-- # -->
 <!-- # summary(df_no_geom$`Percent Population 65 and Above`)[[2]] -->
@@ -370,7 +454,37 @@ html_table
 Growth Rates By County
 ===========================================================
 
-Coming soon.
+Filters {.sidebar}
+-----------------------------------------------------------------------
+Use the **sliders** and **table** from the previous page to filter out the interactive chart to the right, or vice versa. Refresh your browser to restart filtering.
+
+Column
+-----------------
+
+### 
+
+```{r}
+# names(condensed_df)
+yest_cases_growth <- ggplot(counties_table) +
+  geom_point(aes(x = `Confirmed Cases per 10K`, y = `Average Daily Percent Change (Past 7 Days)`, text = paste0("County: ", Geo_NAME, " ", State))) +
+  geom_hline(yintercept = growth_median, linetype = 'dashed', color = 'green') +
+  geom_hline(yintercept = growth_p75, linetype = 'dashed', color = 'red') +
+  geom_vline(xintercept = cases_median, linetype = 'dashed', color = 'green') +
+  geom_vline(xintercept = cases_p75, linetype = 'dashed', color = 'red') +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(title = 'Average Daily Case Growth vs. Prevalence',
+       caption = 'Only Counties with First Case at least One Week Ago\nGreen Dashed Lines: Median\nRed Dashed Lines: 75th Percentile') +
+  theme_minimal()
+
+ggplotly(yest_cases_growth)
+
+```
+
+> Notes: Cases and average 7-day growth rates updated as of `r format(Sys.Date()-1, "%B %d, %Y")`.</br>
+Includes only counties with first case at least one week ago.</br>
+Green Dashed Lines: Median</br>
+Red Dashed Lines: 75th Percentile
 
 Economic Consequences
 ===========================================================
@@ -379,3 +493,5 @@ Coming soon.
 
 About
 ===========================================================
+
+Coming soon. In the meantime, check out the code and data sources [here](https://github.com/alturkaa/socio-cov).

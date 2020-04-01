@@ -1,7 +1,7 @@
 COVID-19 Dashboard
 ================
 Akram Al-Turk
-2020-03-31
+2020-04-01
 
 <!-- README.md is generated from README.Rmd. -->
 
@@ -11,6 +11,11 @@ Code in this repository is for an interactive
 [dashboard](https://socio-covid.netlify.com/) of various COVID-19 data,
 including social determinants of health, at the county level in the
 United States.
+
+The code for all pages of the website is in the index.Rmd file.
+
+For more about how to create a similar dashboard in R, check out
+[flexdashboards](https://rmarkdown.rstudio.com/flexdashboard/index.html).
 
 ## Data Sources
 
