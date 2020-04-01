@@ -473,9 +473,12 @@ yest_cases_growth <- ggplot(counties_table) +
   scale_y_log10() +
   labs(title = 'Average Daily Case Growth vs. Prevalence',
        caption = 'Only Counties with First Case at least One Week Ago\nGreen Dashed Lines: Median\nRed Dashed Lines: 75th Percentile') +
-  theme_minimal()
+  theme_minimal() 
 
-ggplotly(yest_cases_growth)
+ggplotly(yest_cases_growth) %>%
+  highlight("plotly_selected")
+
+options(persistent = TRUE)
 
 ```
 
