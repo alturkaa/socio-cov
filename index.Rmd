@@ -360,8 +360,6 @@ cases_p75 <- summary(df_no_geom$`Confirmed Cases per 10K`)[[5]]
 growth_median <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[3]]
 growth_p75 <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[5]]
 
-growth_median
-
 prop_65_median <- summary(df_no_geom$`Percent Population 65 and Above`)[[3]]
 prop_65_p75 <- summary(df_no_geom$`Percent Population 65 and Above`)[[5]]
 
