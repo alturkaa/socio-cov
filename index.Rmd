@@ -283,7 +283,7 @@ labels_v2 <- sprintf(
   "<strong>%s</strong><br/>Confirmed Cases: %g<br/>Confirmed Cases per 10K: %g",
   shared_cty$data()$Geo_NAME, shared_cty$data()$`Confirmed Cases`, round(shared_cty$data()$`Confirmed Cases per 10K`, 1))
 
-bins <- round(jenks_bins$brks, 2)
+bins <- round(jenks_bins$brks, 1)
 
 pal <- colorBin(
   palette = "YlGnBu",
@@ -352,7 +352,7 @@ Social Risk Factors By County
 df_no_geom <- st_drop_geometry(condensed_df)
 
 df_no_geom <- df_no_geom %>% 
-  mutate_if(is.numeric, round, digits = 2)
+  mutate_if(is.numeric, round, digits = 1)
 
 cases_median <- summary(df_no_geom$`Confirmed Cases per 10K`)[[3]]
 cases_p75 <- summary(df_no_geom$`Confirmed Cases per 10K`)[[5]]
@@ -390,48 +390,48 @@ filter_checkbox("Per Capita Cases Above Median", "Per Capita Cases Above Median?
 # min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]],
 ```
 
-**Median:** `r round(cases_median, 2)`</br>
-**75th Percentile:** `r round(cases_p75, 2)`
+**Median:** `r round(cases_median, 1)`</br>
+**75th Percentile:** `r round(cases_p75, 1)`
 
 ```{r}
 filter_checkbox("Average Growth Rate Above Median", "Average Daily Percent Change (Past Week) Above Median?", counties_table, ~`Average Growth Rate Above Median`, inline = TRUE)
 # min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]],
 ```
 
-**Median:** `r round(growth_median, 2)`</br>
-**75th Percentile:** `r round(growth_p75, 2)`
+**Median:** `r round(growth_median, 1)`</br>
+**75th Percentile:** `r round(growth_p75, 1)`
 
 ```{r}
 filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, round = 1)
 # min = summary(df_no_geom$`Percent Population 65 and Above`)[[2]],
 ```
 
-**Median:** `r round(prop_65_median, 2)`</br>
-**75th Percentile:** `r round(prop_65_p75, 2)`
+**Median:** `r round(prop_65_median, 1)`</br>
+**75th Percentile:** `r round(prop_65_p75, 1)`
 
 ```{r}
 filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, round = 1)
 # max = summary(df_no_geom$`Hospital Beds per 1K`)[[5]],
 ```
 
-**25th Percentile:** `r round(beds_p25, 2)`</br>
-**Median:** `r round(beds_median, 2)`
+**25th Percentile:** `r round(beds_p25, 1)`</br>
+**Median:** `r round(beds_median, 1)`
 
 ```{r}
 filter_slider("Percent Without Insurance (Under 65)", "Percent Without Insurance (Under 65)", counties_table, column=~`Percent Without Insurance (Under 65)`, round = 1)
 # min = summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[2]],
 ```
 
-**Median:** `r round(uninsured_median, 2)`</br>
-**75th Percentile:** `r round(uninsured_p75, 2)`
+**Median:** `r round(uninsured_median, 1)`</br>
+**75th Percentile:** `r round(uninsured_p75, 1)`
 
 ```{r}
 filter_slider("Primary Care Physicians per 100K", "Primary Care Physicians per 100K", counties_table, column=~`Primary Care Physicians per 100K`, round = 1)
 # max = summary(df_no_geom$`Primary Care Physicians per 100K`)[[5]],
 ```
 
-**25th Percentile:** `r round(pcp_p25, 2)`</br>
-**Median:** `r round(pcp_median, 2)`
+**25th Percentile:** `r round(pcp_p25, 1)`</br>
+**Median:** `r round(pcp_median, 1)`
 <!-- # names(df_no_geom) -->
 <!-- # -->
 <!-- # summary(df_no_geom$`Percent Population 65 and Above`)[[2]] -->
