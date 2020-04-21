@@ -28,8 +28,9 @@ library(reticulate)
 ```{python get date in right format for USA Facts data}
 from datetime import date, timedelta
 
-yesterday = date.today() - timedelta(days=1)
+yesterday = date.today() - timedelta(days=2)
 yesterday_usa_facts_format = yesterday.strftime('%m/%d/%Y')
+
 ```
 
 ```{r get census data with shapefiles}
