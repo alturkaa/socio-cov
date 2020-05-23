@@ -487,13 +487,3 @@ options(persistent = TRUE)
 Includes only counties with first case at least one week ago.</br>
 Green Dashed Lines: Median</br>
 Red Dashed Lines: 75th Percentile
-
-Economic Consequences
-===========================================================
-
-Coming soon.
-
-About
-===========================================================
-
-Coming soon. In the meantime, check out the code and data sources [here](https://github.com/alturkaa/socio-cov).
