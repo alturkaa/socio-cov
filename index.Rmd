@@ -255,7 +255,7 @@ condensed_df <- w_hosp_merge %>%
 
 ```{r reproject and use with crosswalk}
 
-cases_counties_final <- set_projection(condensed_df, projection = 'longlat')
+cases_counties_final <- st_transform(condensed_df, crs = "+init=epsg:4326")
 
 # condensed_df <- condensed_df %>% 
 #   as('Spatial')
