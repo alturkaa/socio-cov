@@ -23,6 +23,8 @@ library(zoo)
 # library(summarywidget)
 library(reticulate)
 # tmap_mode('view')
+
+options(tigris_use_cache = TRUE)
 ```
 
 ```{python get date in right format for USA Facts data}
@@ -35,40 +37,107 @@ yesterday_usa_facts_format = yesterday.strftime('%m/%d/%Y')
 
 ```{r get census data with shapefiles}
 # B27010_051 65 and over pop
-# B27010_001 total pop
+# B19083_001 Gini
+# B16010_041 bachelor's or more
+# B16010_001 25 and over (denominator for ed vars)
+# B09021_023 65 and over lives alone
 
-vars <- c('B27010_001', 'B27010_051')
+extra_vars <- c('B09021_023', 'B27010_051', 'B19083_001', 'B16010_041', 'B16010_001')
 
-us_county_test <- get_acs(geography = "county", year = 2018, variables = vars, 
-                            shift_geo = TRUE, geometry = TRUE)
+# us_county_test <- get_acs(geography = "county", year = 2018, variables = vars, 
+#                           shift_geo = TRUE, geometry = TRUE)
 
-counties <- us_county_test %>% 
-  select(-moe) %>% 
-  group_by(GEOID) %>% 
-  spread(variable, estimate)
+# extra vars - with geometry
+extra_vars_geom <- get_acs(geography = "county", output = 'wide', year = 2018, variables = extra_vars, shift_geo = TRUE, geometry = TRUE)
 
-counties <- counties %>% 
-  mutate(prop_65_above_acs_2018 = B27010_051 / B27010_001) %>%
-  rename('Geo_FIPS' = 'GEOID',
-         'Geo_QNAME' = 'NAME')
+extra_vars_geom$mile2 <- st_area(extra_vars_geom$geometry) / 2589988.1103
+
+# county population - without geometry
+county_pop <- get_acs(geography = "county", output = 'wide', year = 2018, table = 'B03002', geometry = FALSE)
+
+correctional_nursing_2010 <- get_decennial(geography = "county", output = 'wide', year = 2010, variables = c('P001001', 'P042003', 'P042005'), geometry = FALSE)
+
+county_merge <- list(extra_vars_geom, county_pop, correctional_nursing_2010)%>% 
+  reduce(left_join, by = 'GEOID')
+
+county_merge <- county_merge %>% 
+  mutate(prop_65_above = B27010_051E / B03002_001E,
+         prop_hispanic = B03002_012E / B03002_001E,
+         prop_nhblack = B03002_004E / B03002_001E,
+         prop_nhwhite = B03002_003E / B03002_001E,
+         pop_per_mile2 = B03002_001E / mile2,
+         prop_college_above = B16010_041E / B16010_001E,
+         prop_65_above_alone = B09021_023E / B27010_051E,
+         prop_correctional_2010 = P042003 / P001001,
+         prop_nursing_2010 = P042005 / P001001) %>% 
+  rename(Gini = B19083_001E)
+```
+```{r}
+# us <- unique(fips_codes$state)[1:51]
+
+# tract population table - no geometry
+# this takes a minute or so
+# import poptable .csv below instead
+# poptable <- reduce(
+#   map(us, function(x) {
+#     get_acs(geography = "tract", table = 'B03002', 
+#             state = x, output = 'wide', geometry = FALSE)
+#   }), 
+#   rbind
+# )
+# 
+# write_csv(poptable, 'tract_race_data.csv')
+
+poptable <- read_csv('tract_race_data.csv')
+
+tract_data <- poptable %>%
+  rename(nonhisp = B03002_002E,
+         nhwhite = B03002_003E,
+         nhblack = B03002_004E,
+         hispanic = B03002_012E, 
+         total_pop = B03002_001E,
+         tract_id = GEOID) %>% 
+  mutate(GEOID = substr(tract_id, 1,5)) %>%
+  select(tract_id, nonhisp, nhwhite, nhblack, hispanic, total_pop, GEOID) %>%
+  arrange(tract_id, GEOID)
+
+county_data <- tract_data %>%
+  group_by(GEOID) %>%
+  summarize(county_pop = sum(total_pop), county_white = sum(nhwhite), county_black = sum(nhblack), county_hispanic = sum(hispanic))
+
+cty_tract <- inner_join(x = tract_data, y = county_data, by = 'GEOID')
+
+tract_dis <- cty_tract %>% 
+  mutate(diss_white_black = abs(nhwhite / county_white - nhblack / county_black),
+         int_black_white = (nhblack / county_black * nhwhite / total_pop),
+         iso_black = (nhblack / county_black * nhblack / total_pop))
+
+county_dis <- tract_dis %>%
+  group_by(GEOID) %>%
+  summarize(dissimilarity_index = .5 * sum(diss_white_black, na.rm=T),
+            interaction_index = sum(int_black_white, na.rm=T),
+            black_isolation_index = sum(iso_black, na.rm=T))
+
+# merge dissimilarity indices with county data from chunk above
+county_w_diss <- inner_join(x = county_merge, y = county_dis, by = 'GEOID')
 ```
 
 ```{r import County Health Rankings data and merge}
 
 health_rank_full <- read_csv('../health_county_full_2016.csv')
 
-cols_to_keep <- c('Geo_QNAME', 'Geo_NAME', 'Geo_FIPS', 'ORG_HD2016_001_HEALTH_T6_V25', 'ORG_HD2016_001_HEALTH_T6_V13', 'ORG_HD2016_003_HEALTH_T9_V9', 'ORG_HD2016_006_HEALTH_T3_V42', 'ORG_HD2016_006_HEALTH_T3_V35', 'ORG_HD2016_006_HEALTH_T3_V25')
+cols_to_keep <- c('Geo_QNAME', 'Geo_NAME', 'Geo_FIPS', 'ORG_HD2016_001_HEALTH_T6_V25', 'ORG_HD2016_001_HEALTH_T6_V13', 'ORG_HD2016_003_HEALTH_T9_V9', 'ORG_HD2016_006_HEALTH_T3_V42', 'ORG_HD2016_006_HEALTH_T3_V35', 'ORG_HD2016_006_HEALTH_T3_V25', 'ORG_HD2016_008_HEALTH_T2_V5')
 
 health_condense <- health_rank_full %>% 
   select(., all_of(cols_to_keep)) %>% 
-  rename('Total Population' = 'ORG_HD2016_001_HEALTH_T6_V25',
-         'Percent Population 65 and Above' = 'ORG_HD2016_001_HEALTH_T6_V13',
-         'Percent Uninsured (Ages 18-64)' = 'ORG_HD2016_003_HEALTH_T9_V9',
+  rename('Percent Uninsured (Ages 18-64)' = 'ORG_HD2016_003_HEALTH_T9_V9',
          'Percent Without Insurance (Under 65)' = 'ORG_HD2016_006_HEALTH_T3_V42',
          'Primary Care Physicians per 100K' = 'ORG_HD2016_006_HEALTH_T3_V35',
-         'Preventable Hospital Stays per 100K Medicare enrollees' = 'ORG_HD2016_006_HEALTH_T3_V25')
+         'Preventable Hospital Stays per 100K Medicare enrollees' = 'ORG_HD2016_006_HEALTH_T3_V25',
+         'Percent Obese (Ages 20 and Above)' = 'ORG_HD2016_008_HEALTH_T2_V5')
 
-health_counties <- merge(counties, health_condense, by = 'Geo_FIPS')
+health_counties <- inner_join(county_w_diss, health_condense, by = c("GEOID" = "Geo_FIPS"))
+
 ```
 
 ```{python}
@@ -123,8 +192,8 @@ usa_facts_for_time_series <- py$usa_facts_cases_df %>%
   filter(Geo_FIPS != '0') %>% 
   select(Geo_FIPS, '01/22/2020':py$yesterday_usa_facts_format)
 
-counties_for_ts_merge <- st_drop_geometry(counties) %>% 
-  select(Geo_FIPS)
+counties_for_ts_merge <- st_drop_geometry(extra_vars_geom) %>% 
+  select(Geo_FIPS = GEOID)
 
 counties_ts <- merge(usa_facts_for_time_series, counties_for_ts_merge, by = 'Geo_FIPS')
 
@@ -200,13 +269,13 @@ counties_w_growth_rates = merge(usa_facts_merge, just_yest, by = c('Geo_FIPS', '
 #   mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B27010_001 / 100000))
 
 # With USA Facts data
-cases_health_counties <- merge(health_counties, counties_w_growth_rates, by = 'Geo_FIPS')
+cases_health_counties <- inner_join(health_counties, counties_w_growth_rates, by = c('GEOID' = 'Geo_FIPS'))
 
 cases_health_counties <- cases_health_counties %>% 
-  mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (B27010_001 / 10000)) %>% 
-  mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B27010_001 / 100000)) %>%
-  mutate('Deaths per 10K' = Deaths / (B27010_001 / 10000)) %>% 
-  mutate('Deaths per 100K' = Deaths / (B27010_001 / 100000))
+  mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (B03002_001E / 10000)) %>% 
+  mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B03002_001E / 100000)) %>%
+  mutate('Deaths per 10K' = Deaths / (B03002_001E / 10000)) %>% 
+  mutate('Deaths per 100K' = Deaths / (B03002_001E / 100000))
 ```
 
 ```{r}
@@ -228,7 +297,7 @@ hifld_beds_by_county <- hifld_hosp %>%
 # 
 # cor.test(beds_merge$hospital_beds.x, beds_merge$hospital_beds.y)
 
-w_hosp_merge <- merge(cases_health_counties, hifld_beds_by_county, by.x = 'Geo_FIPS', by.y = 'COUNTYFIPS', all.x = T)
+w_hosp_merge <- merge(cases_health_counties, hifld_beds_by_county, by.x = 'GEOID', by.y = 'COUNTYFIPS', all.x = T)
 
 # names(w_hosp_merge)
 # 
@@ -239,25 +308,33 @@ w_hosp_merge$hospital_beds[is.na(w_hosp_merge$hospital_beds)] <- 0
 # names(w_hosp_merge)
 
 condensed_df <- w_hosp_merge %>% 
-  select(Geo_FIPS, Geo_NAME, State, B27010_001, prop_65_above_acs_2018, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Confirmed Cases`, Deaths, moving_average, `Confirmed Cases per 10K`, `Deaths per 10K`, hospital_beds, geometry) %>% 
-  rename('Total Population' = 'B27010_001',
-         'Hospital Beds' = 'hospital_beds',
-         'Average Daily Percent Change (Past 7 Days)' = 'moving_average') %>% 
-  mutate('Percent Population 65 and Above' = prop_65_above_acs_2018 * 100,
+  select(GEOID, Geo_NAME, State, B03002_001E, starts_with('prop'), starts_with('pop'), starts_with('P0'), `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Percent Obese (Ages 20 and Above)`, Gini, dissimilarity_index, interaction_index, black_isolation_index, `Confirmed Cases`, Deaths, moving_average, `Confirmed Cases per 10K`, `Deaths per 10K`, hospital_beds, geometry) 
+
+clean_df <- condensed_df %>% 
+  rename('Total Population' = B03002_001E,
+         'Black-White Dissimilarity Index' = dissimilarity_index,
+         'Hospital Beds' = hospital_beds,
+         'Average Daily Percent Change (Past 7 Days)' = moving_average) %>% 
+  mutate('Percent Population 65 and Above' = prop_65_above * 100,
+         'Percent Black' = prop_nhblack * 100,
+         'Percent Hispanic' = prop_hispanic * 100,
+         'Percent College Degree' = prop_college_above * 100,
+         'People Living in Nursing Homes per 1K' = P042005 / (P001001 / 1000),
+         'People Living in Correctional Facilities per 1K' = P042003 / (P001001 / 1000),
          'Hospital Beds per 1K' = `Hospital Beds` / (`Total Population` / 1000),
          'Per Capita Cases Above Median' = ifelse(`Confirmed Cases per 10K` > median(w_hosp_merge$`Confirmed Cases per 10K`), 'Yes', 'No'), 
          'Average Growth Rate Above Median' = ifelse(
            `Average Daily Percent Change (Past 7 Days)` > summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'Yes', 
            ifelse(
-             `Average Daily Percent Change (Past 7 Days)` <= summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'No', NA))) %>% 
-  select(Geo_FIPS, Geo_NAME, State, `Total Population`, `Percent Population 65 and Above`, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Average Daily Percent Change (Past 7 Days)`, `Deaths per 10K`, `Hospital Beds`, `Hospital Beds per 1K`, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Per Capita Cases Above Median`, `Average Growth Rate Above Median`, geometry)
+             `Average Daily Percent Change (Past 7 Days)` <= summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'No', NA))) %>%
+  select(GEOID, Geo_NAME, State, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Average Daily Percent Change (Past 7 Days)`, `Deaths per 10K`, `Total Population`, `Percent Population 65 and Above`, `Percent Black`, `Percent Hispanic`, `Black-White Dissimilarity Index`, Gini, `People Living in Nursing Homes per 1K`, `People Living in Correctional Facilities per 1K`, `Percent Obese (Ages 20 and Above)`, `Hospital Beds`, `Hospital Beds per 1K`, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Per Capita Cases Above Median`, `Average Growth Rate Above Median`, geometry)
 ```
 
 ```{r reproject and use with crosswalk}
 
-cases_counties_final <- st_transform(condensed_df, crs = "+init=epsg:4326")
+cases_counties_final <- st_transform(clean_df, crs = 4326)
 
-# condensed_df <- condensed_df %>% 
+# clean_df <- clean_df %>%
 #   as('Spatial')
 
 # st_crs(shape_reproj)
@@ -274,7 +351,8 @@ shared_cty <- SharedData$new(cases_counties_final)
 #     title.size = 1,
 #     title.position = c("center", "top"))
 
-jenks_bins <- classInt::classIntervals(condensed_df$`Confirmed Cases per 10K`, n = 5, style = 'jenks')
+# using fisher instead of jenks classification
+jenks_bins <- classInt::classIntervals(clean_df$`Confirmed Cases per 10K`, n = 5, style = 'fisher')
 
 # cty_map <- st_transform(cty_map, crs = 4326)
 
@@ -288,7 +366,7 @@ bins <- round(jenks_bins$brks, 1)
 
 pal <- colorBin(
   palette = "YlGnBu",
-  domain = condensed_df$`Confirmed Cases per 10K`,
+  domain = clean_df$`Confirmed Cases per 10K`,
   bins = bins
 )
 
@@ -298,7 +376,7 @@ shared_leaf_map <- shared_cty %>%
   addProviderTiles(provider = "CartoDB.Positron", group = 'Base') %>%
   addPolygons(group = 'Counties', 
               label = lapply(labels_v2, htmltools::HTML),
-    fillColor = ~pal(condensed_df$`Confirmed Cases per 10K`),
+    fillColor = ~pal(clean_df$`Confirmed Cases per 10K`),
     stroke = TRUE,
     fillOpacity = 0.7,
     weight = 0.4) %>% 
@@ -350,7 +428,7 @@ Social Risk Factors By County
 
 ```{r}
 
-df_no_geom <- st_drop_geometry(condensed_df)
+df_no_geom <- st_drop_geometry(clean_df)
 
 df_no_geom <- df_no_geom %>% 
   mutate_if(is.numeric, round, digits = 1)
