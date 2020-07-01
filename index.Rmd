@@ -20,6 +20,12 @@ library(plotly)
 library(DT)
 library(tmaptools)
 library(zoo)
+library(covdata)
+library(janitor)
+library(plm)
+library(broom)
+library(GGally)
+library(stargazer)
 # library(summarywidget)
 library(reticulate)
 # tmap_mode('view')
@@ -41,8 +47,9 @@ yesterday_usa_facts_format = yesterday.strftime('%m/%d/%Y')
 # B16010_041 bachelor's or more
 # B16010_001 25 and over (denominator for ed vars)
 # B09021_023 65 and over lives alone
+# B06011_001 median income
 
-extra_vars <- c('B09021_023', 'B27010_051', 'B19083_001', 'B16010_041', 'B16010_001')
+extra_vars <- c('B09021_023', 'B27010_051', 'B19083_001', 'B16010_041', 'B16010_001', 'B06011_001')
 
 # us_county_test <- get_acs(geography = "county", year = 2018, variables = vars, 
 #                           shift_geo = TRUE, geometry = TRUE)
@@ -70,8 +77,10 @@ county_merge <- county_merge %>%
          prop_65_above_alone = B09021_023E / B27010_051E,
          prop_correctional_2010 = P042003 / P001001,
          prop_nursing_2010 = P042005 / P001001) %>% 
-  rename(Gini = B19083_001E)
+  rename(Gini = B19083_001E, 
+         median_income = B06011_001E)
 ```
+
 ```{r}
 # us <- unique(fips_codes$state)[1:51]
 
@@ -88,7 +97,7 @@ county_merge <- county_merge %>%
 # 
 # write_csv(poptable, 'tract_race_data.csv')
 
-poptable <- read_csv('tract_race_data.csv')
+poptable <- read_csv('../tract_race_data.csv')
 
 tract_data <- poptable %>%
   rename(nonhisp = B03002_002E,
@@ -145,6 +154,9 @@ import pandas as pd
 
 # USA Facts cases data and df
 usa_facts_cases_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_confirmed_usafacts.csv', dtype={'countyFIPS' : str})
+
+# Check on this. Sometimes there's a column at the end that's nonsense, so I added this line. Remove if the last column is fine.
+usa_facts_cases_df = usa_facts_cases_df.iloc[:,:-1]
 
 usa_facts_cases_df.columns = usa_facts_cases_df.columns[:4].tolist() + pd.to_datetime(usa_facts_cases_df.columns[4:]).strftime('%m/%d/%Y').tolist()
 
@@ -276,6 +288,11 @@ cases_health_counties <- cases_health_counties %>%
   mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B03002_001E / 100000)) %>%
   mutate('Deaths per 10K' = Deaths / (B03002_001E / 10000)) %>% 
   mutate('Deaths per 100K' = Deaths / (B03002_001E / 100000))
+
+# create state population var from counties pop
+cases_health_counties <- cases_health_counties %>% 
+  group_by(State) %>% 
+  mutate(state_pop = sum(B03002_001E))
 ```
 
 ```{r}
@@ -304,30 +321,57 @@ w_hosp_merge <- merge(cases_health_counties, hifld_beds_by_county, by.x = 'GEOID
 # summary(w_hosp_merge$hospital_beds)
 
 w_hosp_merge$hospital_beds[is.na(w_hosp_merge$hospital_beds)] <- 0
+```
 
+```{r}
+covid_tests_by_state <- covus %>% 
+  group_by(date, state, measure) %>% 
+  filter(measure == 'positive' | measure == 'negative') %>% 
+  summarize(total_of_measure = sum(count)) %>% 
+  group_by(state, date) %>% 
+  mutate(total_tests = sum(total_of_measure)) %>% 
+  arrange(desc(total_tests)) %>% 
+  group_by(state) %>% 
+  slice(which.max(as.Date(date, '%m/%d/%Y'))) %>% 
+  select(state, total_tests) %>% 
+  rename(State = state) %>% 
+  arrange(desc(total_tests))
+
+full_w_tests <- inner_join(w_hosp_merge, covid_tests_by_state, by = 'State')
+
+full_w_tests$tests_per_capita <- full_w_tests$total_tests / full_w_tests$state_pop
+```
+
+```{r}
 # names(w_hosp_merge)
 
-condensed_df <- w_hosp_merge %>% 
-  select(GEOID, Geo_NAME, State, B03002_001E, starts_with('prop'), starts_with('pop'), starts_with('P0'), `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Percent Obese (Ages 20 and Above)`, Gini, dissimilarity_index, interaction_index, black_isolation_index, `Confirmed Cases`, Deaths, moving_average, `Confirmed Cases per 10K`, `Deaths per 10K`, hospital_beds, geometry) 
+condensed_df <- full_w_tests %>% 
+  select(GEOID, Geo_NAME, State, B03002_001E, starts_with('prop'), starts_with('pop'), starts_with('P0'), `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Percent Obese (Ages 20 and Above)`, median_income, Gini, dissimilarity_index, interaction_index, black_isolation_index, `Confirmed Cases`, Deaths, moving_average, `Confirmed Cases per 10K`, `Deaths per 10K`, hospital_beds, tests_per_capita, geometry)
+
+write_csv(condensed_df, '../covid_data_june30.csv')
 
 clean_df <- condensed_df %>% 
   rename('Total Population' = B03002_001E,
          'Black-White Dissimilarity Index' = dissimilarity_index,
          'Hospital Beds' = hospital_beds,
-         'Average Daily Percent Change (Past 7 Days)' = moving_average) %>% 
+         'Median Income' = median_income,
+         'Average Daily Percent Change (Past 7 Days)' = moving_average, 
+         'Tests Per Capita (State Level)' = tests_per_capita) %>% 
   mutate('Percent Population 65 and Above' = prop_65_above * 100,
          'Percent Black' = prop_nhblack * 100,
          'Percent Hispanic' = prop_hispanic * 100,
          'Percent College Degree' = prop_college_above * 100,
-         'People Living in Nursing Homes per 1K' = P042005 / (P001001 / 1000),
-         'People Living in Correctional Facilities per 1K' = P042003 / (P001001 / 1000),
+         'People Living in Nursing Homes per 1K (2010)' = P042005 / (P001001 / 1000),
+         'People Living in Correctional Facilities per 1K (2010)' = P042003 / (P001001 / 1000),
          'Hospital Beds per 1K' = `Hospital Beds` / (`Total Population` / 1000),
          'Per Capita Cases Above Median' = ifelse(`Confirmed Cases per 10K` > median(w_hosp_merge$`Confirmed Cases per 10K`), 'Yes', 'No'), 
          'Average Growth Rate Above Median' = ifelse(
            `Average Daily Percent Change (Past 7 Days)` > summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'Yes', 
            ifelse(
              `Average Daily Percent Change (Past 7 Days)` <= summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'No', NA))) %>%
-  select(GEOID, Geo_NAME, State, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Average Daily Percent Change (Past 7 Days)`, `Deaths per 10K`, `Total Population`, `Percent Population 65 and Above`, `Percent Black`, `Percent Hispanic`, `Black-White Dissimilarity Index`, Gini, `People Living in Nursing Homes per 1K`, `People Living in Correctional Facilities per 1K`, `Percent Obese (Ages 20 and Above)`, `Hospital Beds`, `Hospital Beds per 1K`, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Per Capita Cases Above Median`, `Average Growth Rate Above Median`, geometry)
+  select(GEOID, Geo_NAME, State, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Average Daily Percent Change (Past 7 Days)`, `Deaths per 10K`, `Total Population`, `Percent Population 65 and Above`, `Percent Black`, `Percent Hispanic`, `Black-White Dissimilarity Index`, `Median Income`, Gini, `People Living in Nursing Homes per 1K (2010)`, `People Living in Correctional Facilities per 1K (2010)`, `Percent Obese (Ages 20 and Above)`, `Hospital Beds`, `Hospital Beds per 1K`, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Tests Per Capita (State Level)`, `Per Capita Cases Above Median`, `Average Growth Rate Above Median`, geometry)
+
+
 ```
 
 ```{r reproject and use with crosswalk}
@@ -360,9 +404,9 @@ jenks_bins <- classInt::classIntervals(clean_df$`Confirmed Cases per 10K`, n = 5
 
 labels_v2 <- sprintf(
   "<strong>%s</strong><br/>Confirmed Cases: %g<br/>Confirmed Cases per 10K: %g",
-  shared_cty$data()$Geo_NAME, shared_cty$data()$`Confirmed Cases`, round(shared_cty$data()$`Confirmed Cases per 10K`, 1))
+  shared_cty$data()$Geo_NAME, shared_cty$data()$`Confirmed Cases`, round(shared_cty$data()$`Confirmed Cases per 10K`, 2))
 
-bins <- round(jenks_bins$brks, 1)
+bins <- round(jenks_bins$brks, 2)
 
 pal <- colorBin(
   palette = "YlGnBu",
@@ -431,7 +475,7 @@ Social Risk Factors By County
 df_no_geom <- st_drop_geometry(clean_df)
 
 df_no_geom <- df_no_geom %>% 
-  mutate_if(is.numeric, round, digits = 1)
+  mutate_if(is.numeric, round, digits = 2)
 
 cases_median <- summary(df_no_geom$`Confirmed Cases per 10K`)[[3]]
 cases_p75 <- summary(df_no_geom$`Confirmed Cases per 10K`)[[5]]
@@ -439,8 +483,8 @@ cases_p75 <- summary(df_no_geom$`Confirmed Cases per 10K`)[[5]]
 growth_median <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[3]]
 growth_p75 <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[5]]
 
-prop_65_median <- summary(df_no_geom$`Percent Population 65 and Above`)[[3]]
-prop_65_p75 <- summary(df_no_geom$`Percent Population 65 and Above`)[[5]]
+prop_black_median <- summary(df_no_geom$`Percent Black`)[[3]]
+prop_black_p75 <- summary(df_no_geom$`Percent Black`)[[5]]
 
 beds_p25 <- summary(df_no_geom$`Hospital Beds per 1K`)[[2]]
 beds_median <- summary(df_no_geom$`Hospital Beds per 1K`)[[3]]
@@ -448,8 +492,8 @@ beds_median <- summary(df_no_geom$`Hospital Beds per 1K`)[[3]]
 uninsured_median <- summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[3]]
 uninsured_p75 <- summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[5]]
 
-pcp_p25 <- summary(df_no_geom$`Primary Care Physicians per 100K`)[[2]]
-pcp_median <- summary(df_no_geom$`Primary Care Physicians per 100K`)[[3]]
+# pcp_p25 <- summary(df_no_geom$`Primary Care Physicians per 100K`)[[2]]
+# pcp_median <- summary(df_no_geom$`Primary Care Physicians per 100K`)[[3]]
 
 # summary(df_no_geom$`Primary Care Physicians per 100K`)
 
@@ -469,52 +513,40 @@ filter_checkbox("Per Capita Cases Above Median", "Per Capita Cases Above Median?
 # min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]],
 ```
 
-**Median:** `r round(cases_median, 1)`</br>
-**75th Percentile:** `r round(cases_p75, 1)`
+**Median:** `r round(cases_median, 2)`</br>
+**75th Percentile:** `r round(cases_p75, 2)`
 
 ```{r}
 filter_checkbox("Average Growth Rate Above Median", "Average Daily Percent Change (Past Week) Above Median?", counties_table, ~`Average Growth Rate Above Median`, inline = TRUE)
 # min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]],
 ```
 
-**Median:** `r round(growth_median, 1)`</br>
-**75th Percentile:** `r round(growth_p75, 1)`
+**Median:** `r round(growth_median, 2)`</br>
+**75th Percentile:** `r round(growth_p75, 2)`
 
 ```{r}
-filter_slider("Percent Population 65 and Above", "Percent Population 65 and Above", counties_table, column=~`Percent Population 65 and Above`, round = 1)
-# min = summary(df_no_geom$`Percent Population 65 and Above`)[[2]],
+filter_slider("Percent Black", "Percent Black", counties_table, column=~`Percent Black`, round = 2)
+# min = summary(df_no_geom$`Percent Black`)[[2]],
 ```
 
-**Median:** `r round(prop_65_median, 1)`</br>
-**75th Percentile:** `r round(prop_65_p75, 1)`
+**Median:** `r round(prop_black_median, 2)`</br>
+**75th Percentile:** `r round(prop_black_p75, 2)`
 
 ```{r}
-filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, round = 1)
+filter_slider("Hospital Beds per 1K", "Hospital Beds per 1K", counties_table, column=~`Hospital Beds per 1K`, round = 2)
 # max = summary(df_no_geom$`Hospital Beds per 1K`)[[5]],
 ```
 
-**25th Percentile:** `r round(beds_p25, 1)`</br>
-**Median:** `r round(beds_median, 1)`
+**25th Percentile:** `r round(beds_p25, 2)`</br>
+**Median:** `r round(beds_median, 2)`
 
 ```{r}
-filter_slider("Percent Without Insurance (Under 65)", "Percent Without Insurance (Under 65)", counties_table, column=~`Percent Without Insurance (Under 65)`, round = 1)
+filter_slider("Percent Without Insurance (Under 65)", "Percent Without Insurance (Under 65)", counties_table, column=~`Percent Without Insurance (Under 65)`, round = 2)
 # min = summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[2]],
 ```
 
-**Median:** `r round(uninsured_median, 1)`</br>
-**75th Percentile:** `r round(uninsured_p75, 1)`
-
-```{r}
-filter_slider("Primary Care Physicians per 100K", "Primary Care Physicians per 100K", counties_table, column=~`Primary Care Physicians per 100K`, round = 1)
-# max = summary(df_no_geom$`Primary Care Physicians per 100K`)[[5]],
-```
-
-**25th Percentile:** `r round(pcp_p25, 1)`</br>
-**Median:** `r round(pcp_median, 1)`
-<!-- # names(df_no_geom) -->
-<!-- # -->
-<!-- # summary(df_no_geom$`Percent Population 65 and Above`)[[2]] -->
-<!-- # summary(df_no_geom$`Hospital Beds per 1K`)[[5]] -->
+**Median:** `r round(uninsured_median, 2)`</br>
+**75th Percentile:** `r round(uninsured_p75, 2)`
 
 Column
 -----------------
@@ -528,40 +560,178 @@ html_table
 > Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/), [County Health Rankings](https://www.countyhealthrankings.org/), [Homeland Infrastructure Foundation-Level Data](https://hifld-geoplatform.opendata.arcgis.com/datasets/6ac5e325468c4cb9b905f1728d6fbf0f_0)</br>
 > Note: Does not include cases not assigned to counties.
 
-Growth Rates By County
+<!-- Growth Rates By County -->
+<!-- =========================================================== -->
+
+<!-- Filters {.sidebar} -->
+<!-- ----------------------------------------------------------------------- -->
+<!-- Use the **sliders** and **table** from the previous page to filter out the interactive chart to the right, or vice versa. Refresh your browser to restart filtering. -->
+
+<!-- Column -->
+<!-- ----------------- -->
+
+<!-- ###  -->
+
+<!-- ```{r} -->
+<!-- # names(condensed_df) -->
+<!-- yest_cases_growth <- ggplot(counties_table) + -->
+<!--   geom_point(aes(x = `Confirmed Cases per 10K`, y = `Average Daily Percent Change (Past 7 Days)`, text = paste0("County: ", Geo_NAME, " ", State))) + -->
+<!--   geom_hline(yintercept = growth_median, linetype = 'dashed', color = 'green') + -->
+<!--   geom_hline(yintercept = growth_p75, linetype = 'dashed', color = 'red') + -->
+<!--   geom_vline(xintercept = cases_median, linetype = 'dashed', color = 'green') + -->
+<!--   geom_vline(xintercept = cases_p75, linetype = 'dashed', color = 'red') + -->
+<!--   scale_x_log10() + -->
+<!--   scale_y_log10() + -->
+<!--   labs(title = 'Average Daily Case Growth vs. Prevalence', -->
+<!--        caption = 'Only Counties with First Case at least One Week Ago\nGreen Dashed Lines: Median\nRed Dashed Lines: 75th Percentile') + -->
+<!--   theme_minimal()  -->
+
+<!-- ggplotly(yest_cases_growth) %>% -->
+<!--   highlight("plotly_selected") -->
+
+<!-- # options(persistent = TRUE) -->
+
+<!-- ``` -->
+
+<!-- > Notes: Cases and average 7-day growth rates updated as of `r format(Sys.Date()-1, "%B %d, %Y")`.</br> -->
+<!-- Includes only counties with first case at least one week ago.</br> -->
+<!-- Green Dashed Lines: Median</br> -->
+<!-- Red Dashed Lines: 75th Percentile -->
+
+Preliminary Analysis
 ===========================================================
 
-Filters {.sidebar}
------------------------------------------------------------------------
-Use the **sliders** and **table** from the previous page to filter out the interactive chart to the right, or vice versa. Refresh your browser to restart filtering.
-
-Column
------------------
-
-### 
-
 ```{r}
-# names(condensed_df)
-yest_cases_growth <- ggplot(counties_table) +
-  geom_point(aes(x = `Confirmed Cases per 10K`, y = `Average Daily Percent Change (Past 7 Days)`, text = paste0("County: ", Geo_NAME, " ", State))) +
-  geom_hline(yintercept = growth_median, linetype = 'dashed', color = 'green') +
-  geom_hline(yintercept = growth_p75, linetype = 'dashed', color = 'red') +
-  geom_vline(xintercept = cases_median, linetype = 'dashed', color = 'green') +
-  geom_vline(xintercept = cases_p75, linetype = 'dashed', color = 'red') +
-  scale_x_log10() +
-  scale_y_log10() +
-  labs(title = 'Average Daily Case Growth vs. Prevalence',
-       caption = 'Only Counties with First Case at least One Week Ago\nGreen Dashed Lines: Median\nRed Dashed Lines: 75th Percentile') +
-  theme_minimal() 
+condensed_df <- condensed_df %>%
+  rename(population = B03002_001E) %>% 
+  mutate(hospital_beds_per_10k = hospital_beds / (population / 10000))
 
-ggplotly(yest_cases_growth) %>%
-  highlight("plotly_selected")
+relsoc <- read_csv('../../social_capital/115967-V1/nanda_relcivsoc_tract_2006-2015_01P_csv_with_readme/nanda_relcivsoc_tract_2006-2015_01P.csv')
 
-options(persistent = TRUE)
+parks <- read_csv('../../social_capital/117921-V1/nanda_parks_tract_2018_01P_csv_with_readme/nanda_parks_tract_2018_01P.csv')
 
+soc_service <- read_csv('../../social_capital/117163-V1/nanda_socsvcs_tract_2006-2015_01P_csv_with_readme/nanda_socsvcs_tract_2006-2015_01P.csv')
+
+rs_county <- relsoc %>% 
+  mutate(GEOID = substr(tract_fips10, 1,5)) %>% 
+  select(tract_fips10, GEOID, totpop10, starts_with('count_15'), starts_with('density_15')) %>% 
+  group_by(GEOID) %>%
+  summarize(rel_orgs = sum(count_15_8131),
+            civic_orgs = sum(count_15_8134))
+
+soc_service_county <- soc_service %>% 
+  mutate(GEOID = substr(tract_fips10, 1, 5)) %>% 
+  select(tract_fips10, GEOID, count_15_624, count_15_624120) %>% 
+  group_by(GEOID) %>% 
+  summarize(soc_assist_orgs = sum(count_15_624),
+            elderly_disab_orgs = sum(count_15_624120))
+
+parks_county <- parks %>%
+  mutate(GEOID = substr(tract_fips10, 1,5)) %>% 
+  select(tract_fips10, GEOID, tract_area_sqmiles, any_open_park, count_open_parks, tot_park_area_sqmiles, prop_park_area_tract) %>% 
+  group_by(GEOID) %>%
+  summarize(total_parks = sum(count_open_parks),
+            total_park_area_sqmiles = sum(tot_park_area_sqmiles))
+
+county_orgs <- list(rs_county, parks_county, soc_service_county) %>%
+  reduce(inner_join, by="GEOID")
+
+cov_w_orgs <- inner_join(condensed_df, county_orgs, by = 'GEOID')
+
+cov_w_orgs <- clean_names(cov_w_orgs)
+
+cov_w_orgs$fatality <- cov_w_orgs$deaths / cov_w_orgs$confirmed_cases
+
+cov_w_orgs <- cov_w_orgs %>% 
+  mutate(rel_per_10k = rel_orgs / (population / 10000),
+         civic_per_10k = civic_orgs / ( population / 10000),
+         parks_per_10k = total_parks / (population / 10000),
+         park_area_per_10k = total_park_area_sqmiles / (population / 10000),
+         eld_dis_per_10k = elderly_disab_orgs / (population / 10000),
+         soc_assist_per_10k = soc_assist_orgs / (population / 10000),
+         nursing_per_10k = prop_nursing_2010 * 10000,
+         correctional_per_10k = prop_correctional_2010 * 10000,
+         tests_per_10k = tests_per_capita * 10000)
+
+scaled_df <- cov_w_orgs %>%
+  mutate_if(is.numeric, scale)
+
+old_names <- c('pop_per_mile2', 'prop_65_above', 'prop_nhblack','prop_hispanic', 'median_income', 'gini', 'dissimilarity_index', 'interaction_index', 'prop_college_above', 'correctional_per_10k', 'nursing_per_10k', 'percent_obese_ages_20_and_above', 'percent_without_insurance_under_65', 'primary_care_physicians_per_100k', 'hospital_beds_per_10k', 'tests_per_10k', 'rel_per_10k', 'civic_per_10k', 'parks_per_10k', 'eld_dis_per_10k')
+
+new_names <- c('Population Density', '% 65 and Above', '% Black', '% Hispanic', 'Median Income', 'Gini Index (Economic Inequality)', 'Black-White Dissimilarity Index', 'Black-White Interaction Index', '% College Degree', '% Living in Correctional Facility', '% Living in Nursing Home', '% Obese', '% Without Health Insurance', 'Primary Care Doctors', 'Hospital Beds', 'Viral Tests (State Level)', 'Religious Organizations', 'Civic Organizations', 'Parks', 'Service Orgs Focused on Elderly/Disabled')
+
+cases_orgs_plm <- lm(confirmed_cases_per_10k ~ pop_per_mile2 + prop_65_above + prop_nhblack + prop_hispanic + median_income + gini + dissimilarity_index + interaction_index + prop_college_above + correctional_per_10k + nursing_per_10k + percent_obese_ages_20_and_above + percent_without_insurance_under_65 + primary_care_physicians_per_100k + hospital_beds_per_10k + tests_per_10k + rel_per_10k + civic_per_10k + parks_per_10k + eld_dis_per_10k + factor(state), data = scaled_df)
+
+cases_model_df <- tidy(cases_orgs_plm, conf.int = TRUE) %>% 
+  filter(!str_detect(term, 'factor|Intercept'))
+
+# rename terms
+new_terms_cases <- plyr::mapvalues(cases_model_df$term, from = old_names, to = new_names)
+cases_model_df$term <- new_terms_cases
+
+cond_cases_model <- cases_model_df %>% 
+  filter(p.value < 0.05 & !str_detect(term, 'tests'))
+
+cases_new_order <- order(cond_cases_model$conf.high, decreasing = FALSE)
+cond_cases_model$term <- as.character(cond_cases_model$term)
+cond_cases_model$term <- factor(cond_cases_model$term, levels = cond_cases_model$term[cases_new_order])
+
+plot_cases <- ggplot(cond_cases_model, aes(x=term, y = estimate)) + 
+  geom_hline(yintercept=0, colour="#8C2318") +  # Line at 0
+  geom_pointrange(aes(ymin=conf.low, ymax=conf.high)) +  # Ranges for each coefficient
+  labs(x="Coefficient", y="Estimate", title="Coefficient Estimates of Regression Model\nof Covid-19 Cases per Capita") +
+  coord_flip() +
+  theme_minimal()
+
+deaths_orgs_plm <- lm(deaths_per_10k ~ pop_per_mile2 + prop_65_above + prop_nhblack + prop_hispanic + median_income + gini + dissimilarity_index + interaction_index + prop_college_above + correctional_per_10k + nursing_per_10k + percent_obese_ages_20_and_above + percent_without_insurance_under_65 + primary_care_physicians_per_100k + hospital_beds_per_10k + tests_per_10k + rel_per_10k + civic_per_10k + parks_per_10k + eld_dis_per_10k + factor(state), data = scaled_df)
+
+deaths_model_df <- tidy(deaths_orgs_plm, conf.int = TRUE) %>% 
+  filter(!str_detect(term, 'factor|Intercept'))
+
+# rename terms
+new_terms_deaths <- plyr::mapvalues(deaths_model_df$term, from = old_names, to = new_names)
+deaths_model_df$term <- new_terms_deaths
+
+cond_deaths_model <- deaths_model_df %>% 
+  filter(p.value < 0.05 & !str_detect(term, 'tests'))
+
+deaths_new_order <- order(cond_deaths_model$conf.high, decreasing = FALSE)
+cond_deaths_model$term <- as.character(cond_deaths_model$term)
+cond_deaths_model$term <- factor(cond_deaths_model$term, levels = cond_deaths_model$term[deaths_new_order])
+
+plot_deaths <- ggplot(cond_deaths_model, aes(x=term, y = estimate)) + 
+  geom_hline(yintercept=0, colour="#8C2318") +  # Line at 0
+  geom_pointrange(aes(ymin=conf.low, ymax=conf.high)) +  # Ranges for each coefficient
+  labs(x="Coefficient", y="Estimate", title="Coefficient Estimates of Regression Model\nof Covid-19 Deaths per Capita") +
+  coord_flip() +
+  theme_minimal()
 ```
 
-> Notes: Cases and average 7-day growth rates updated as of `r format(Sys.Date()-1, "%B %d, %Y")`.</br>
-Includes only counties with first case at least one week ago.</br>
-Green Dashed Lines: Median</br>
-Red Dashed Lines: 75th Percentile
+Column {data-width=450}
+-------------------------------------
+
+### Regression Model
+
+```{r results='asis'}
+
+iv_list <- c('Population Density', '% 65 and Above', '% Black', '% Hispanic', 'Median Income', 'Gini Index (Economic Inequality)', 'Black-White Dissimilarity Index', 'Black-White Interaction Index', '% College Degree', '% Living in Correctional Facility', '% Living in Nursing Home', '% Obese', '% Without Health Insurance', 'Primary Care Doctors', 'Hospital Beds', 'Viral Tests (State Level)', 'Religious Organizations', 'Civic Organizations', 'Parks', 'Service Orgs Focused on Elderly/Disabled', '(Intercept)')
+
+title <- paste0('Fixed Effects Model of Covid-19 Deaths per Capita in U.S. Counties, January 22 - ', format(Sys.Date()-1, "%B %d"))
+
+stargazer(deaths_orgs_plm, df = FALSE, dep.var.labels = 'Deaths per Capita', covariate.labels = iv_list, type = 'html', title = title, single.row = TRUE, omit = 'factor', notes = 'Note: Variables are population weighted and scaled.</br>', add.lines = list(c('State Fixed Effects?', 'Yes')), digits = 2, star.cutoffs = c(0.05, 0.01, 0.001), out = 'covid_deaths_regression.html')
+```
+
+Column {data-width=550}
+-------------------------------------
+
+### Coefficients Plot
+
+```{r}
+ggplotly(plot_deaths)
+```
+
+> Notes: Unit of analysis: U.S. counties.</br>Only statistically significant variables at the .05 level are included in the coefficient plot. Other variables can be found in the table to the left.</br>Bands are 95% confidence intervals.
+
+Analysis Details
+===========================================================
+
