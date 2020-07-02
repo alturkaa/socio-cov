@@ -155,17 +155,17 @@ health_counties <- inner_join(county_w_diss, health_condense, by = c("GEOID" = "
 import pandas as pd
 
 # USA Facts cases data and df
-usa_facts_cases_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_confirmed_usafacts.csv', dtype={'countyFIPS' : str})
+usa_facts_cases_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_confirmed_usafacts.csv', dtype={'countyFIPS' : str, 'stateFIPS' : str})
 
 # Check on this. Sometimes there's a column at the end that's nonsense, so I added this line. Remove if the last column is fine.
-usa_facts_cases_df = usa_facts_cases_df.iloc[:,:-1]
+# usa_facts_cases_df = usa_facts_cases_df.iloc[:,:-1]
 
 usa_facts_cases_df.columns = usa_facts_cases_df.columns[:4].tolist() + pd.to_datetime(usa_facts_cases_df.columns[4:]).strftime('%m/%d/%Y').tolist()
 
 # usa_facts_cases_df.dtypes
 
 # USA Facts deaths data and df
-usa_facts_deaths_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_deaths_usafacts.csv', dtype={'countyFIPS' : str})
+usa_facts_deaths_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_deaths_usafacts.csv', dtype={'countyFIPS' : str, 'stateFIPS' : str})
 
 usa_facts_deaths_df.columns = usa_facts_deaths_df.columns[:4].tolist() + pd.to_datetime(usa_facts_deaths_df.columns[4:]).strftime('%m/%d/%Y').tolist()
 
@@ -709,7 +709,7 @@ plot_deaths <- ggplot(cond_deaths_model, aes(x=term, y = estimate)) +
   theme_minimal()
 ```
 
-Column {style="height:50pc;"}
+Column {style="height:48pc;"}
 -------------------------------------
 
 ### Regression Model
@@ -756,13 +756,19 @@ Health indicators -- the number of people that are obese, the number without hea
 
 ##### **Social and Civic Infrastructure**
 
+A number of indicators come from the recently released National Neighborhood Data Archive, which can be found at [openICPSR](https://www.openicpsr.org/openicpsr/). Variables include number of parks, civic organizations, religious organizations, and social service organizations focused on the elderly and disabled. All of these data are at the Census Tract level, so I aggregated them to the county level. 
+
 #### **Methods**
 
 The analysis on the previous page is a regression of Covid-19 deaths per capita in the U.S. on a number of demographic, social, and economic indicators -- all measured at the county level. I include state fixed effects, which tries to account for the fact that counties within a state have similar characteristics, including, in this case, state wide stay-at-home orders. Running the analysis without state fixed effects and including state-level viral testing capacity (which can't be included in the fixed effects model) doesn't substantively change the findings.
 
+All of the code to put the data together and to run the analysis is available in the [Github repository](https://github.com/alturkaa/socio-cov) of this dashboard. All of the data, except the County Health Rankings (as far as I know), are publicly available. 
+
 #### **Segregation Indices**
 
-The formula for the Black-White dissimilarity index, for each county, is:
+I calculated two commonly used segregation indices, the dissimilarity index and the interaction index. The former is the most commonly used index to measure evenness, or how spatially distributed different groups of people are in an area. The latter is an exposure measure. It measures how likely someone from one group is to interact with someone from a different group. In both cases, I am interested in how spatially distributed Blacks and Whites are, and how likely they are to interact, in each county. These measures depend on how one defines the smaller and larger geographic areas. In this case, the smaller geographic area I use for the measure is the Census Tract and the larger one, to match the rest of my analysis, is the county.  You can find out more about these measures [here](https://www.census.gov/hhes/www/housing/resseg/pdf/app_b.pdf), [here](https://s4.ad.brown.edu/projects/diversity/index.htm), and [here](http://www.censusscope.org/about_dissimilarity.html), and how to calculate them in R [here](https://rpubs.com/corey_sparks/473785). 
+
+In this case, the formula for the Black-White dissimilarity index, for each county, is:
 
 $$\frac{1}{2} * \sum_{i}^{n}\left|\frac{b_{i}}{B}-\frac{w_{i}}{W}\right|$$
 where $b_{i}$ is the Black population in $i$ Census Tract, $B$ is the total Black population in the county, $w_{i}$ is the White population in $i$ Census Tract, and $W$ is the total White population in the county. 
@@ -772,3 +778,4 @@ The formula for the Black-White interaction index, for each county, is:
 $$\sum_{i}^{n}\left[\frac{b_{i}}{B}*\frac{w_{i}}{t_{i}}\right]$$
 where all measures are the same as in the dissimilarity index, except that $t_{i}$ is the total population of the Census Tract. 
 
+Although the two measures are certainly related, they are not highly correlated ($\rho = 0.11$), so it makes sense to include them both in the analysis. 
