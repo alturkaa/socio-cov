@@ -25,6 +25,7 @@ library(janitor)
 library(plm)
 library(broom)
 library(GGally)
+# library(biscale)
 library(stargazer)
 # library(summarywidget)
 library(reticulate)
@@ -351,7 +352,7 @@ full_w_tests$tests_per_capita <- full_w_tests$total_tests / full_w_tests$state_p
 condensed_df <- full_w_tests %>% 
   select(GEOID, Geo_NAME, State, B03002_001E, starts_with('prop'), starts_with('pop'), starts_with('P0'), `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Percent Obese (Ages 20 and Above)`, median_income, Gini, dissimilarity_index, interaction_index, black_isolation_index, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, hospital_beds, tests_per_capita, geometry)
 
-write_csv(condensed_df, '../covid_data_june30.csv')
+# write_csv(condensed_df, '../covid_data_june30.csv')
 
 clean_df <- condensed_df %>% 
   rename('Total Population' = B03002_001E,
@@ -720,7 +721,7 @@ iv_list <- c('Population Density', '% 65 and Above', '% Black', '% Hispanic', 'M
 
 title <- paste0('Fixed Effects Model of Covid-19 Deaths per Capita in U.S. Counties, January 22 - ', format(Sys.Date()-1, "%B %d"))
 
-stargazer(deaths_orgs_plm, df = FALSE, dep.var.labels = 'Deaths per Capita', covariate.labels = iv_list, title = title, type = 'html', single.row = TRUE, omit = 'factor', notes = 'Variables are population weighted and scaled, with a mean of 0 and standard deviation of 1.</br><span>&#42;&#42;&#42;</span>: p<0.001; <span>&#42;&#42;</span>: p<0.01; <span>&#42;</span>: p<0.05', notes.append = FALSE, add.lines = list(c('State Fixed Effects?', 'Yes')), digits = 2, column.sep.width = '1pt', star.cutoffs = c(0.05, 0.01, 0.001), out = 'covid_deaths_regression.html')
+stargazer(deaths_orgs_plm, df = FALSE, dep.var.labels = 'Deaths per Capita', covariate.labels = iv_list, title = title, type = 'html', single.row = TRUE, omit = 'factor', notes = 'Variables are population weighted and scaled, with a mean of 0 and standard deviation of 1.</br><span>&#42;&#42;&#42;</span>: p<0.001; <span>&#42;&#42;</span>: p<0.01; <span>&#42;</span>: p<0.05', notes.append = FALSE, add.lines = list(c('State Fixed Effects?', 'Yes')), digits = 2, column.sep.width = '1pt', star.cutoffs = c(0.05, 0.01, 0.001), out = paste0('covid_deaths_regression_', Sys.Date()-1, '.html'))
 
 ```
 
@@ -756,7 +757,7 @@ Health indicators -- the number of people that are obese, the number without hea
 
 ##### **Social and Civic Infrastructure**
 
-A number of indicators come from the recently released National Neighborhood Data Archive, which can be found at [openICPSR](https://www.openicpsr.org/openicpsr/). Variables include number of parks, civic organizations, religious organizations, and social service organizations focused on the elderly and disabled. All of these data are at the Census Tract level, so I aggregated them to the county level. 
+A number of indicators come from the recently released National Neighborhood Data Archive, which can be found at [openICPSR](https://www.openicpsr.org/openicpsr/). Variables include number of public parks, civic organizations, religious organizations, and social service organizations focused on the elderly and disabled. All of these data are at the Census Tract level, so I aggregated them to the county level. 
 
 #### **Methods**
 
