@@ -1,7 +1,6 @@
 ---
 title: "COVID-19 Dashboard"
-author: "Akram Al-Turk"  
-date: "`r Sys.Date()`"  
+author: "Akram Al-Turk  \n[More data and code](https://akramalturk.org/post/)"
 output: github_document
 ---
   

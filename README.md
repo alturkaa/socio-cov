@@ -1,7 +1,7 @@
 COVID-19 Dashboard
 ================
-Akram Al-Turk
-2020-07-06
+Akram Al-Turk  
+[More data and code](https://akramalturk.org/post/)
 
 <!-- README.md is generated from README.Rmd. -->
 
