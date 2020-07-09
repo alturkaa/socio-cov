@@ -425,7 +425,7 @@ cases_counties_final <- st_transform(clean_df, crs = 4326)
 #         options = layersControlOptions(collapsed = TRUE)
 #       )
 
-# ---- Map for Per Capita Cases and Growth Rates
+# ---- Map for Per Capita Cases and Growth Rates (Jenks breaks)
 
 # create column with fisher classification of two variables (cases per capita and growth rate)
 df_w_bivar <- bi_class(cases_counties_final, x = `Confirmed Cases per 10K`, y = `Average Daily Percent Change (Past 7 Days)`, style = 'fisher', keep_factors = T, dim = 3)
@@ -474,7 +474,7 @@ bivar_leaf_map <- df_w_bivar %>%
   addPolygons(label = lapply(labels_v2, htmltools::HTML),
               fillColor = ~factor_pal(df_w_bivar$bi_class),
     stroke = T,
-    fillOpacity = 0.9,
+    fillOpacity = 1,
     weight = 0.4) %>%
   addLayersControl(
         baseGroups = 'Base',
@@ -502,7 +502,47 @@ bivar_leaf_map
 ```
 
 > Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)</br>
-> Notes: Does not include cases not assigned to counties.</br>3X3 bivariate choropleths use Fisher-Jenks breaks.
+> Notes: Does not include cases not assigned to counties.</br>3X3 bivariate choropleths use Fisher-Jenks breaks. For a map using quantile breaks, download the quantile_bivar_map.html file [here](https://github.com/alturkaa/socio-cov).
+
+```{r quantile bivar map, include=FALSE}
+# ---- Map for Per Capita Cases and Growth Rates (quantile breaks)
+
+# create column with fisher classification of two variables (cases per capita and growth rate)
+quantile_w_bivar <- bi_class(cases_counties_final, x = `Confirmed Cases per 10K`, y = `Average Daily Percent Change (Past 7 Days)`, style = 'quantile', keep_factors = T, dim = 3)
+
+# if growth rate is NA (because no growth in last 7 days), include in lowest classification
+quantile_w_bivar <- quantile_w_bivar %>% 
+  mutate(bi_class = str_replace(bi_class, 'NA', '1'))
+
+# make the bivariate column a factor and align levels with color palette
+quantile_w_bivar$bi_class <- factor(quantile_w_bivar$bi_class, levels = names(bi_palette))
+
+# color palette for leaflet map
+quantile_factor_pal <- colorFactor(
+  palette = bi_palette,
+  domain = quantile_w_bivar$bi_class
+)
+
+# create leaflet map
+quantile_bivar_leaf_map <- quantile_w_bivar %>% 
+  leaflet() %>% 
+  setView(-96, 37.8, 5) %>% 
+  addProviderTiles(provider = "CartoDB.Positron", group = 'Base') %>%
+  addPolygons(label = lapply(labels_v2, htmltools::HTML),
+              fillColor = ~quantile_factor_pal(quantile_w_bivar$bi_class),
+              stroke = T,
+              fillOpacity = 1,
+              weight = 0.4) %>%
+  addLayersControl(
+    baseGroups = 'Base',
+    overlayGroups = 'Counties',
+    options = layersControlOptions(collapsed = TRUE)
+  ) %>% 
+  addControl(html = html_legend,
+             position = 'bottomright')
+
+save_html(quantile_bivar_leaf_map, file = 'quantile_bivar_map.html')
+```
 
 Social Risk Factors By County
 ===========================================================
