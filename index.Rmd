@@ -453,10 +453,10 @@ legend <- bi_legend(pal = "DkBlue",
                     dim = 3,
                     xlab = "Higher Per Capita Cases",
                     ylab = "Higher Growth Rate",
-                    size = 12)
+                    size = 10)
 
 # save legend as picture and html (for leaflet)
-capturePlot(legend, filename = 'legend.html', width = 175, height = 175)
+capturePlot(legend, filename = 'legend.html', width = 150, height = 150)
 ggsave(legend, filename = 'legend.png')
 
 html_legend <- "<img src='legend.html'/>"
