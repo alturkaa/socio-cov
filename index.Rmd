@@ -3,7 +3,7 @@ title: "COVID-19 Dashboard"
 output: 
   flexdashboard::flex_dashboard:
     orientation: columns
-    vertical_layout: fill
+    # vertical_layout: fill
     navbar:
       - {icon: "fa-github", href: "https://github.com/alturkaa/socio-cov", align: right }
 ---
@@ -25,10 +25,11 @@ library(janitor)
 library(plm)
 library(broom)
 library(GGally)
-# library(biscale)
+library(biscale)
 library(stargazer)
 # library(summarywidget)
 library(reticulate)
+library(htmltools)
 # tmap_mode('view')
 
 options(tigris_use_cache = TRUE)
@@ -220,7 +221,7 @@ cases_long <- counties_ts %>%
 
 cases_long_growth <- cases_long %>% 
   group_by(Geo_FIPS) %>%
-  mutate(pct_change = ((`Confirmed Cases` - lag(`Confirmed Cases`)) / lag(`Confirmed Cases`)) * 100) %>% 
+  mutate(pct_change = ((`Confirmed Cases` - dplyr::lag(`Confirmed Cases`)) / dplyr::lag(`Confirmed Cases`)) * 100) %>% 
   mutate_if(is.numeric, list(~na_if(., Inf)))
 
 cases_long_growth$pct_change[cases_long_growth$pct_change == 'NaN'] <- NA
@@ -350,16 +351,17 @@ full_w_tests$tests_per_capita <- full_w_tests$total_tests / full_w_tests$state_p
 
 # took out moving_average
 condensed_df <- full_w_tests %>% 
-  select(GEOID, Geo_NAME, State, B03002_001E, starts_with('prop'), starts_with('pop'), starts_with('P0'), `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Percent Obese (Ages 20 and Above)`, median_income, Gini, dissimilarity_index, interaction_index, black_isolation_index, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, hospital_beds, tests_per_capita, geometry)
+  select(GEOID, Geo_NAME, State, B03002_001E, starts_with('prop'), starts_with('pop'), starts_with('P0'), `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Percent Obese (Ages 20 and Above)`, median_income, Gini, dissimilarity_index, interaction_index, black_isolation_index, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, moving_average, hospital_beds, tests_per_capita, geometry)
 
 # write_csv(condensed_df, '../covid_data_june30.csv')
+# st_write(condensed_df, '../covid_data_july8_spatial.shp')
 
 clean_df <- condensed_df %>% 
   rename('Total Population' = B03002_001E,
          'Black-White Dissimilarity Index' = dissimilarity_index,
          'Hospital Beds' = hospital_beds,
          'Median Income' = median_income,
-         # 'Average Daily Percent Change (Past 7 Days)' = moving_average, 
+         'Average Daily Percent Change (Past 7 Days)' = moving_average, 
          'Tests Per Capita (State Level)' = tests_per_capita) %>% 
   mutate('Percent Population 65 and Above' = prop_65_above * 100,
          'Percent Black' = prop_nhblack * 100,
@@ -368,110 +370,139 @@ clean_df <- condensed_df %>%
          'People Living in Nursing Homes per 1K (2010)' = P042005 / (P001001 / 1000),
          'People Living in Correctional Facilities per 1K (2010)' = P042003 / (P001001 / 1000),
          'Hospital Beds per 1K' = `Hospital Beds` / (`Total Population` / 1000),
-         'Per Capita Cases Above Median' = ifelse(`Confirmed Cases per 10K` > median(w_hosp_merge$`Confirmed Cases per 10K`), 'Yes', 'No')) %>%
-         # 'Average Growth Rate Above Median' = ifelse(
-         #  `Average Daily Percent Change (Past 7 Days)` > summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'Yes', 
-         #  ifelse(
-        #   `Average Daily Percent Change (Past 7 Days)` <= summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'No', NA))) 
-        select(GEOID, Geo_NAME, State, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, `Total Population`, `Percent Population 65 and Above`, `Percent Black`, `Percent Hispanic`, `Black-White Dissimilarity Index`, `Median Income`, Gini, `People Living in Nursing Homes per 1K (2010)`, `People Living in Correctional Facilities per 1K (2010)`, `Percent Obese (Ages 20 and Above)`, `Hospital Beds`, `Hospital Beds per 1K`, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Tests Per Capita (State Level)`, `Per Capita Cases Above Median`, geometry)
+         'Per Capita Cases Above Median' = ifelse(`Confirmed Cases per 10K` > median(w_hosp_merge$`Confirmed Cases per 10K`), 'Yes', 'No'),
+        'Average Growth Rate Above Median' = ifelse(
+         `Average Daily Percent Change (Past 7 Days)` > summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'Yes',
+         ifelse(
+          `Average Daily Percent Change (Past 7 Days)` <= summary(`Average Daily Percent Change (Past 7 Days)`)[[3]] & !is.na(`Average Daily Percent Change (Past 7 Days)`), 'No', NA))) %>% 
+        select(GEOID, Geo_NAME, State, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, `Average Daily Percent Change (Past 7 Days)`, `Total Population`, `Percent Population 65 and Above`, `Percent Black`, `Percent Hispanic`, `Black-White Dissimilarity Index`, `Median Income`, Gini, `People Living in Nursing Homes per 1K (2010)`, `People Living in Correctional Facilities per 1K (2010)`, `Percent Obese (Ages 20 and Above)`, `Hospital Beds`, `Hospital Beds per 1K`, `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Tests Per Capita (State Level)`, `Per Capita Cases Above Median`, `Average Growth Rate Above Median`, geometry)
 
 # , `Average Daily Percent Change (Past 7 Days)`
 # , `Average Growth Rate Above Median`
 
 ```
 
-```{r reproject and use with crosswalk}
+```{r reproject and create map, include=FALSE}
 
 cases_counties_final <- st_transform(clean_df, crs = 4326)
+# shared_cty <- SharedData$new(cases_counties_final)
 
-# clean_df <- clean_df %>%
-#   as('Spatial')
+# ---- Map for Per Capita Cases Only
 
-# st_crs(shape_reproj)
+# # using fisher instead of jenks classification
+# jenks_bins <- classInt::classIntervals(cases_counties_final$`Confirmed Cases per 10K`, n = 5, style = 'fisher')
+# 
+# labels <- sprintf(
+#   "<strong>%s</strong><br/>Confirmed Cases: %g<br/>Confirmed Cases per 10K: %g",
+#   cases_counties_final$Geo_NAME, cases_counties_final$`Confirmed Cases`, round(cases_counties_final$`Confirmed Cases per 10K`, 2))
+# 
+# bins <- round(jenks_bins$brks, 2)
+# 
+# pal <- colorBin(
+#   palette = "YlGnBu",
+#   domain = cases_counties_final$`Confirmed Cases per 10K`,
+#   bins = bins
+# )
+# 
+# leaf_map <- cases_counties_final %>% 
+#   leaflet() %>% 
+#   setView(-96, 37.8, 5) %>% 
+#   addProviderTiles(provider = "CartoDB.Positron", group = 'Base') %>%
+#   addPolygons(group = 'Counties', 
+#               label = lapply(labels, htmltools::HTML),
+#     fillColor = ~pal(cases_counties_final$`Confirmed Cases per 10K`),
+#     stroke = TRUE,
+#     fillOpacity = 0.7,
+#     weight = 0.4) %>% 
+#     addLegend("bottomright",
+#     pal = pal,
+#     values = ~ `Confirmed Cases per 10K`,
+#     title = "Confirmed Cases per 10K",
+#     opacity = 1) %>% 
+#   addLayersControl(
+#         baseGroups = 'Base',
+#         overlayGroups = 'Counties',
+#         options = layersControlOptions(collapsed = TRUE)
+#       )
 
-# st_transform(crs = "+init=epsg:4326")
+# ---- Map for Per Capita Cases and Growth Rates
 
-shared_cty <- SharedData$new(cases_counties_final)
+# create column with fisher classification of two variables (cases per capita and growth rate)
+df_w_bivar <- bi_class(cases_counties_final, x = `Confirmed Cases per 10K`, y = `Average Daily Percent Change (Past 7 Days)`, style = 'fisher', keep_factors = T, dim = 3)
 
-# st_crs(shared_cty)
+# create the color palette for 3X3 classification
+bi_palette <- bi_pal(pal = "DkBlue", dim = 3, preview = FALSE)
 
-# cty_map <- tm_shape(cases_counties_final) +
-#   tm_polygons('Confirmed Cases per 10K', style = 'jenks', popup.vars = c('Geo_NAME', 'Total Population', 'Percent Population 65 and Above', 'Primary Care Physicians per 100K', 'Percent Without Insurance (Under 65)', 'Confirmed Cases', 'Confirmed Cases per 10K')) +
-#   tm_layout(title = "Per Capita COVID-19 Confirmed Cases By County",
-#     title.size = 1,
-#     title.position = c("center", "top"))
+# if growth rate is NA (because no growth in last 7 days), include in lowest classification
+df_w_bivar <- df_w_bivar %>% 
+  mutate(bi_class = str_replace(bi_class, 'NA', '1'))
 
-# using fisher instead of jenks classification
-jenks_bins <- classInt::classIntervals(clean_df$`Confirmed Cases per 10K`, n = 5, style = 'fisher')
+# make the bivariate column a factor and align levels with color palette
+df_w_bivar$bi_class <- factor(df_w_bivar$bi_class, levels = names(bi_palette))
 
-# cty_map <- st_transform(cty_map, crs = 4326)
+# summary(df_w_bivar$bi_class)
 
-# labels <- paste0(shared_cty$data()$Geo_NAME, "<br/>", "Confirmed Cases per 10K: ", round(shared_cty$data()$`Confirmed Cases per 10K`, 1))
-
-labels_v2 <- sprintf(
-  "<strong>%s</strong><br/>Confirmed Cases: %g<br/>Confirmed Cases per 10K: %g",
-  shared_cty$data()$Geo_NAME, shared_cty$data()$`Confirmed Cases`, round(shared_cty$data()$`Confirmed Cases per 10K`, 2))
-
-bins <- round(jenks_bins$brks, 2)
-
-pal <- colorBin(
-  palette = "YlGnBu",
-  domain = clean_df$`Confirmed Cases per 10K`,
-  bins = bins
+# color palette for leaflet map
+factor_pal <- colorFactor(
+  palette = bi_palette,
+  domain = df_w_bivar$bi_class
 )
 
-shared_leaf_map <- shared_cty %>% 
+# create legend
+legend <- bi_legend(pal = "DkBlue",
+                    dim = 3,
+                    xlab = "Higher Per Capita Cases",
+                    ylab = "Higher Growth Rate",
+                    size = 12)
+
+# save legend as picture and html (for leaflet)
+capturePlot(legend, filename = 'legend.html', width = 175, height = 175)
+ggsave(legend, filename = 'legend.png')
+
+html_legend <- "<img src='legend.html'/>"
+
+# labels for map
+labels_v2 <- sprintf(
+  "<strong>%s</strong><br/>Confirmed Cases per 10K: %g<br/>Average Daily Percent Change (Past 7 Days): %g",
+  df_w_bivar$Geo_NAME, round(df_w_bivar$`Confirmed Cases per 10K`, 2), round(df_w_bivar$`Average Daily Percent Change (Past 7 Days)`, 2))
+
+# create leaflet map
+bivar_leaf_map <- df_w_bivar %>% 
   leaflet() %>% 
   setView(-96, 37.8, 5) %>% 
   addProviderTiles(provider = "CartoDB.Positron", group = 'Base') %>%
-  addPolygons(group = 'Counties', 
-              label = lapply(labels_v2, htmltools::HTML),
-    fillColor = ~pal(clean_df$`Confirmed Cases per 10K`),
-    stroke = TRUE,
-    fillOpacity = 0.7,
-    weight = 0.4) %>% 
-    addLegend("bottomright",
-    pal = pal,
-    values = ~ `Confirmed Cases per 10K`,
-    title = "Confirmed Cases per 10K",
-    opacity = 1) %>% 
+  addPolygons(label = lapply(labels_v2, htmltools::HTML),
+              fillColor = ~factor_pal(df_w_bivar$bi_class),
+    stroke = T,
+    fillOpacity = 0.9,
+    weight = 0.4) %>%
   addLayersControl(
         baseGroups = 'Base',
         overlayGroups = 'Counties',
         options = layersControlOptions(collapsed = TRUE)
-      )
+      ) %>% 
+  addControl(html = html_legend,
+             position = 'bottomright')
 
-# cty_leaflet <- tmap_leaflet(cty_map)
 ```
 
-Per Capita Cases By County
+Per Capita Cases and Growth Rates By County
 =============================================================
 
 ### Data Updated as of `r format(Sys.Date()-1, "%B %d, %Y")`
 
 ```{r map, message=FALSE, warning=FALSE}
 
-shared_leaf_map
+# Per Capita map
+# leaf_map
 
-# cty_leaflet
+# Per Capita and Growth Rate map
+bivar_leaf_map
 
-# tmap_save(cty_map, filename = 'county_map_test_v2.html')
-
-# cty_layers <- tm_shape(shape_reproj) +
-#   tm_polygons(c('Confirmed Cases per 100K', 'Primary Care Physicians per 100K'),
-#               style = 'jenks', 
-#               popup.vars = c('Geo_NAME', 'Total Population', 'Percent Population 65 and Above', 'Primary Care Physicians per 100K', 'Percent Without Insurance (Under 65)', 'Confirmed Cases', 'Confirmed Cases per 100K'),
-#               title = c('Confirmed Cases per 100K', 'Primary Care Physicians per 100K')) +
-#   tm_facets(as.layers = TRUE)
-#   # tm_layout(title = "Per Capita COVID-19 Confirmed Cases By County",
-#   #   title.size = 1,
-#   #   title.position = c("center", "top"))
-# 
-# cty_layers
 ```
 
 > Data Sources: [Johns Hopkins University Center for Systems Science and Engineering](https://github.com/CSSEGISandData/COVID-19), [USAFacts](https://usafacts.org/visualizations/coronavirus-covid-19-spread-map/), [American Community Survey 2018 (5-Year Estimates)](https://www.census.gov/)</br>
-> Note: Does not include cases not assigned to counties.
+> Notes: Does not include cases not assigned to counties.</br>3X3 bivariate choropleths use Fisher-Jenks breaks.
 
 Social Risk Factors By County
 ===========================================================
@@ -486,8 +517,8 @@ df_no_geom <- df_no_geom %>%
 cases_median <- summary(df_no_geom$`Confirmed Cases per 10K`)[[3]]
 cases_p75 <- summary(df_no_geom$`Confirmed Cases per 10K`)[[5]]
 
-# growth_median <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[3]]
-# growth_p75 <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[5]]
+growth_median <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[3]]
+growth_p75 <- summary(df_no_geom$`Average Daily Percent Change (Past 7 Days)`)[[5]]
 
 prop_black_median <- summary(df_no_geom$`Percent Black`)[[3]]
 prop_black_p75 <- summary(df_no_geom$`Percent Black`)[[5]]
@@ -523,9 +554,12 @@ filter_checkbox("Per Capita Cases Above Median", "Per Capita Cases Above Median?
 **75th Percentile:** `r round(cases_p75, 2)`
 
 ```{r}
-# filter_checkbox("Average Growth Rate Above Median", "Average Daily Percent Change (Past Week) Above Median?", counties_table, ~`Average Growth Rate Above Median`, inline = TRUE)
+filter_checkbox("Average Growth Rate Above Median", "Average Daily Percent Change (Past Week) Above Median?", counties_table, ~`Average Growth Rate Above Median`, inline = TRUE)
 # min = summary(df_no_geom$`Confirmed Cases per 10K`)[[2]],
 ```
+
+**Median:** `r round(growth_median, 2)`</br>
+**75th Percentile:** `r round(growth_p75, 2)`
 
 ```{r}
 filter_slider("Percent Black", "Percent Black", counties_table, column=~`Percent Black`, round = 2)
