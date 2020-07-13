@@ -678,7 +678,7 @@ html_table
 Preliminary Analysis {style="position:relative;"}
 ===========================================================
 
-```{r}
+```{r, include=FALSE}
 condensed_df <- condensed_df %>%
   rename(population = B03002_001E) %>% 
   mutate(hospital_beds_per_10k = hospital_beds / (population / 10000))
@@ -779,9 +779,12 @@ cond_deaths_model$term <- factor(cond_deaths_model$term, levels = cond_deaths_mo
 plot_deaths <- ggplot(cond_deaths_model, aes(x=term, y = estimate)) + 
   geom_hline(yintercept=0, colour="#8C2318") +  # Line at 0
   geom_pointrange(aes(ymin=conf.low, ymax=conf.high)) +  # Ranges for each coefficient
-  labs(x="Coefficient", y="Estimate", title="Coefficient Estimates of Regression Model\nof Covid-19 Deaths per Capita") +
+  labs(x="Coefficient", y="Estimate", title=paste0('Coefficient Estimates of Regression Model of Covid-19\nDeaths per Capita, January 22 - ', format(Sys.Date()-1, "%B %d"))) +
   coord_flip() +
   theme_minimal()
+
+ggsave(plot_deaths, filename = paste0('coef_plot_', Sys.Date()-1, '.png'))
+
 ```
 
 Column {style="height:48pc;"}
