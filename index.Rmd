@@ -51,24 +51,29 @@ yesterday_usa_facts_format = yesterday.strftime('%m/%d/%Y')
 # B09021_023 65 and over lives alone
 # B06011_001 median income
 
+# name of Census variables to get from API
 extra_vars <- c('B09021_023', 'B27010_051', 'B19083_001', 'B16010_041', 'B16010_001', 'B06011_001')
 
 # us_county_test <- get_acs(geography = "county", year = 2018, variables = vars, 
 #                           shift_geo = TRUE, geometry = TRUE)
 
-# extra vars - with geometry
+# function to get extra vars - with geometry
 extra_vars_geom <- get_acs(geography = "county", output = 'wide', year = 2018, variables = extra_vars, shift_geo = TRUE, geometry = TRUE)
 
+# convert area of county to square miles
 extra_vars_geom$mile2 <- st_area(extra_vars_geom$geometry) / 2589988.1103
 
-# county population - without geometry
+# get county population and race data - without geometry
 county_pop <- get_acs(geography = "county", output = 'wide', year = 2018, table = 'B03002', geometry = FALSE)
 
+# get variables for people living in correctional and nursing facilities from 2010 Census
 correctional_nursing_2010 <- get_decennial(geography = "county", output = 'wide', year = 2010, variables = c('P001001', 'P042003', 'P042005'), geometry = FALSE)
 
+# merge three dataframes
 county_merge <- list(extra_vars_geom, county_pop, correctional_nursing_2010)%>% 
   reduce(left_join, by = 'GEOID')
 
+# create variables
 county_merge <- county_merge %>% 
   mutate(prop_65_above = B27010_051E / B03002_001E,
          prop_hispanic = B03002_012E / B03002_001E,
@@ -99,8 +104,10 @@ county_merge <- county_merge %>%
 # 
 # write_csv(poptable, 'tract_race_data.csv')
 
+# import race data at the tract level
 poptable <- read_csv('../tract_race_data.csv')
 
+# create variables, create county FIPS var, and subset df
 tract_data <- poptable %>%
   rename(nonhisp = B03002_002E,
          nhwhite = B03002_003E,
@@ -112,17 +119,21 @@ tract_data <- poptable %>%
   select(tract_id, nonhisp, nhwhite, nhblack, hispanic, total_pop, GEOID) %>%
   arrange(tract_id, GEOID)
 
+# create county data from tract data
 county_data <- tract_data %>%
   group_by(GEOID) %>%
   summarize(county_pop = sum(total_pop), county_white = sum(nhwhite), county_black = sum(nhblack), county_hispanic = sum(hispanic))
 
+# join county and tract data
 cty_tract <- inner_join(x = tract_data, y = county_data, by = 'GEOID')
 
+# first step in creating segregation indices
 tract_dis <- cty_tract %>% 
   mutate(diss_white_black = abs(nhwhite / county_white - nhblack / county_black),
          int_black_white = (nhblack / county_black * nhwhite / total_pop),
          iso_black = (nhblack / county_black * nhblack / total_pop))
 
+# second step in creating segregation indices
 county_dis <- tract_dis %>%
   group_by(GEOID) %>%
   summarize(dissimilarity_index = .5 * sum(diss_white_black, na.rm=T),
@@ -135,10 +146,13 @@ county_w_diss <- inner_join(x = county_merge, y = county_dis, by = 'GEOID')
 
 ```{r import County Health Rankings data and merge}
 
+# import County Health Rankings data (not publicly available)
 health_rank_full <- read_csv('../health_county_full_2016.csv')
 
+# list columns to keep from df
 cols_to_keep <- c('Geo_QNAME', 'Geo_NAME', 'Geo_FIPS', 'ORG_HD2016_001_HEALTH_T6_V25', 'ORG_HD2016_001_HEALTH_T6_V13', 'ORG_HD2016_003_HEALTH_T9_V9', 'ORG_HD2016_006_HEALTH_T3_V42', 'ORG_HD2016_006_HEALTH_T3_V35', 'ORG_HD2016_006_HEALTH_T3_V25', 'ORG_HD2016_008_HEALTH_T2_V5')
 
+# subset df and rename some vars
 health_condense <- health_rank_full %>% 
   select(., all_of(cols_to_keep)) %>% 
   rename('Percent Uninsured (Ages 18-64)' = 'ORG_HD2016_003_HEALTH_T9_V9',
@@ -147,8 +161,10 @@ health_condense <- health_rank_full %>%
          'Preventable Hospital Stays per 100K Medicare enrollees' = 'ORG_HD2016_006_HEALTH_T3_V25',
          'Percent Obese (Ages 20 and Above)' = 'ORG_HD2016_008_HEALTH_T2_V5')
 
+# replace NA with 0 for PCP variable
 health_condense$`Primary Care Physicians per 100K`[is.na(health_condense$`Primary Care Physicians per 100K`)] <- 0
 
+# merge in health data
 health_counties <- inner_join(county_w_diss, health_condense, by = c("GEOID" = "Geo_FIPS"))
 
 ```
@@ -162,6 +178,7 @@ usa_facts_cases_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/p
 # Check on this. Sometimes there's a column at the end that's nonsense, so I added this line. Remove if the last column is fine.
 # usa_facts_cases_df = usa_facts_cases_df.iloc[:,:-1]
 
+# rename columns
 usa_facts_cases_df.columns = usa_facts_cases_df.columns[:4].tolist() + pd.to_datetime(usa_facts_cases_df.columns[4:]).strftime('%m/%d/%Y').tolist()
 
 # usa_facts_cases_df.dtypes
@@ -169,6 +186,7 @@ usa_facts_cases_df.columns = usa_facts_cases_df.columns[:4].tolist() + pd.to_dat
 # USA Facts deaths data and df
 usa_facts_deaths_df = pd.read_csv('https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_deaths_usafacts.csv', dtype={'countyFIPS' : str, 'stateFIPS' : str})
 
+# rename columns
 usa_facts_deaths_df.columns = usa_facts_deaths_df.columns[:4].tolist() + pd.to_datetime(usa_facts_deaths_df.columns[4:]).strftime('%m/%d/%Y').tolist()
 
 # function to add leading zeros to FIPS
@@ -178,8 +196,8 @@ def add_leading_zero(text):
   else:
     return text
 
+# run function to add leading zeros to FIPS
 usa_facts_cases_df['Geo_FIPS'] = usa_facts_cases_df['countyFIPS'].apply(add_leading_zero) 
-
 usa_facts_deaths_df['Geo_FIPS'] = usa_facts_deaths_df['countyFIPS'].apply(add_leading_zero)
 ```
 
@@ -211,27 +229,33 @@ usa_facts_for_time_series <- py$usa_facts_cases_df %>%
 counties_for_ts_merge <- st_drop_geometry(extra_vars_geom) %>% 
   select(Geo_FIPS = GEOID)
 
+# merge time series Covid data with original counties data
 counties_ts <- merge(usa_facts_for_time_series, counties_for_ts_merge, by = 'Geo_FIPS')
 
 # names(py$usa_facts_cases_df)
 
+# convert to long format to calculate case growth
 cases_long <- counties_ts %>% 
   pivot_longer(cols = '01/22/2020':py$yesterday_usa_facts_format, names_to = 'Date', values_to = 'Confirmed Cases') %>% 
   arrange(Geo_FIPS, Date)
 
+# create pct_change variable
 cases_long_growth <- cases_long %>% 
   group_by(Geo_FIPS) %>%
   mutate(pct_change = ((`Confirmed Cases` - dplyr::lag(`Confirmed Cases`)) / dplyr::lag(`Confirmed Cases`)) * 100) %>% 
   mutate_if(is.numeric, list(~na_if(., Inf)))
 
+# convert NaN to NA
 cases_long_growth$pct_change[cases_long_growth$pct_change == 'NaN'] <- NA
 
+# calculate 7 day rolling average
 cases_long_growth <- cases_long_growth %>%
   mutate(moving_average = rollmean(pct_change, 7, align='right', fill=NA))
 
 # cases_growth_no_missing <- cases_long_growth %>% 
 #   filter(!is.na(moving_average))
 
+# filter to just yesterday's cases
 just_yest <- cases_long_growth %>% 
   filter(Date == py$yesterday_usa_facts_format)
 
@@ -269,8 +293,10 @@ usa_facts_deaths <- py$usa_facts_deaths_df %>%
   filter(!is.na(Deaths)) %>% # filter out NAs, which in this df are duplicates, not missing data
   filter(Geo_FIPS != '0') 
 
+# merge cases and deaths df's
 usa_facts_merge = merge(usa_facts_cases, usa_facts_deaths, by = c('Geo_FIPS', 'State'))
 
+# create df of just one obs per county with case numbers, deaths, and growth rates
 counties_w_growth_rates = merge(usa_facts_merge, just_yest, by = c('Geo_FIPS', 'Confirmed Cases'))
 
 # length(unique(us_cases$Geo_FIPS))
@@ -284,9 +310,10 @@ counties_w_growth_rates = merge(usa_facts_merge, just_yest, by = c('Geo_FIPS', '
 #   mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (B27010_001 / 10000)) %>% 
 #   mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B27010_001 / 100000))
 
-# With USA Facts data
+# merge census-health indicators df with USA Facts data
 cases_health_counties <- inner_join(health_counties, counties_w_growth_rates, by = c('GEOID' = 'Geo_FIPS'))
 
+# create vars
 cases_health_counties <- cases_health_counties %>% 
   mutate('Confirmed Cases per 10K' = `Confirmed Cases` / (B03002_001E / 10000)) %>% 
   mutate('Confirmed Cases per 100K' = `Confirmed Cases` / (B03002_001E / 100000)) %>%
@@ -306,10 +333,13 @@ cases_health_counties <- cases_health_counties %>%
 #   group_by(FCOUNTY) %>% 
 #   summarize(hospital_beds = sum(AHAbeds, na.rm = TRUE))
 
+# import hospital beds data
 hifld_hosp <- read_csv('../HIFLD_Hospitals.csv')
 
+# replace -999 with 0
 hifld_hosp$BEDS[hifld_hosp$BEDS== -999] <- 0
 
+# get df of beds by county
 hifld_beds_by_county <- hifld_hosp %>%
   group_by(COUNTYFIPS) %>% 
   summarize(hospital_beds = sum(BEDS, na.rm = TRUE))
@@ -318,16 +348,19 @@ hifld_beds_by_county <- hifld_hosp %>%
 # 
 # cor.test(beds_merge$hospital_beds.x, beds_merge$hospital_beds.y)
 
+# merge in bed data
 w_hosp_merge <- merge(cases_health_counties, hifld_beds_by_county, by.x = 'GEOID', by.y = 'COUNTYFIPS', all.x = T)
 
 # names(w_hosp_merge)
 # 
 # summary(w_hosp_merge$hospital_beds)
 
+# replace NA in beds variable with 0
 w_hosp_merge$hospital_beds[is.na(w_hosp_merge$hospital_beds)] <- 0
 ```
 
 ```{r}
+# function to get covid tests by state
 covid_tests_by_state <- covus %>% 
   group_by(date, state, measure) %>% 
   filter(measure == 'positive' | measure == 'negative') %>% 
@@ -341,21 +374,24 @@ covid_tests_by_state <- covus %>%
   rename(State = state) %>% 
   arrange(desc(total_tests))
 
+# merge in tests data
 full_w_tests <- inner_join(w_hosp_merge, covid_tests_by_state, by = 'State')
 
+# create tests per capita var
 full_w_tests$tests_per_capita <- full_w_tests$total_tests / full_w_tests$state_pop
 ```
 
 ```{r}
 # names(w_hosp_merge)
 
-# took out moving_average
+# create condensed df
 condensed_df <- full_w_tests %>% 
   select(GEOID, Geo_NAME, State, B03002_001E, starts_with('prop'), starts_with('pop'), starts_with('P0'), `Percent Without Insurance (Under 65)`, `Primary Care Physicians per 100K`, `Preventable Hospital Stays per 100K Medicare enrollees`, `Percent Obese (Ages 20 and Above)`, median_income, Gini, dissimilarity_index, interaction_index, black_isolation_index, `Confirmed Cases`, Deaths, `Confirmed Cases per 10K`, `Deaths per 10K`, moving_average, hospital_beds, tests_per_capita, geometry)
 
 # write_csv(condensed_df, '../covid_data_june30.csv')
 # st_write(condensed_df, '../covid_data_july8_spatial.shp')
 
+# rename vars and create new ones for online table
 clean_df <- condensed_df %>% 
   rename('Total Population' = B03002_001E,
          'Black-White Dissimilarity Index' = dissimilarity_index,
@@ -384,6 +420,7 @@ clean_df <- condensed_df %>%
 
 ```{r reproject and create map, include=FALSE}
 
+# transform map projection of above df
 cases_counties_final <- st_transform(clean_df, crs = 4326)
 # shared_cty <- SharedData$new(cases_counties_final)
 
@@ -541,6 +578,7 @@ quantile_bivar_leaf_map <- quantile_w_bivar %>%
   addControl(html = html_legend,
              position = 'bottomright')
 
+# save quantile breaks map
 save_html(quantile_bivar_leaf_map, file = 'quantile_bivar_map.html')
 ```
 
@@ -549,11 +587,14 @@ Social Risk Factors By County
 
 ```{r}
 
+# take out geometry from df
 df_no_geom <- st_drop_geometry(clean_df)
 
+# round numeric columns to 2 sig digits
 df_no_geom <- df_no_geom %>% 
   mutate_if(is.numeric, round, digits = 2)
 
+# create median and quintile vars for interactive feature on site
 cases_median <- summary(df_no_geom$`Confirmed Cases per 10K`)[[3]]
 cases_p75 <- summary(df_no_geom$`Confirmed Cases per 10K`)[[5]]
 
@@ -574,8 +615,10 @@ uninsured_p75 <- summary(df_no_geom$`Percent Without Insurance (Under 65)`)[[5]]
 
 # summary(df_no_geom$`Primary Care Physicians per 100K`)
 
+# make a shareable dataframe for interactive feature
 counties_table <- SharedData$new(df_no_geom)
 
+# create html table
 html_table <- datatable(counties_table, rownames = FALSE, style="bootstrap", class="compact", width="100%", options=list(order = list(6, "desc"), pageLength = 15))
 ```
 
@@ -683,12 +726,16 @@ condensed_df <- condensed_df %>%
   rename(population = B03002_001E) %>% 
   mutate(hospital_beds_per_10k = hospital_beds / (population / 10000))
 
+# import in religious and civic orgs data
 relsoc <- read_csv('../../social_capital/115967-V1/nanda_relcivsoc_tract_2006-2015_01P_csv_with_readme/nanda_relcivsoc_tract_2006-2015_01P.csv')
 
+# import in parks data
 parks <- read_csv('../../social_capital/117921-V1/nanda_parks_tract_2018_01P_csv_with_readme/nanda_parks_tract_2018_01P.csv')
 
+# import in social services data
 soc_service <- read_csv('../../social_capital/117163-V1/nanda_socsvcs_tract_2006-2015_01P_csv_with_readme/nanda_socsvcs_tract_2006-2015_01P.csv')
 
+# for next three chunks, create vars, subset and get total numbers by county
 rs_county <- relsoc %>% 
   mutate(GEOID = substr(tract_fips10, 1,5)) %>% 
   select(tract_fips10, GEOID, totpop10, starts_with('count_15'), starts_with('density_15')) %>% 
@@ -710,15 +757,20 @@ parks_county <- parks %>%
   summarize(total_parks = sum(count_open_parks),
             total_park_area_sqmiles = sum(tot_park_area_sqmiles))
 
+# join three dfs
 county_orgs <- list(rs_county, parks_county, soc_service_county) %>%
   reduce(inner_join, by="GEOID")
 
+# merge with original df
 cov_w_orgs <- inner_join(condensed_df, county_orgs, by = 'GEOID')
 
+# clean names function from janitor
 cov_w_orgs <- clean_names(cov_w_orgs)
 
+# create fatality rate indicator
 cov_w_orgs$fatality <- cov_w_orgs$deaths / cov_w_orgs$confirmed_cases
 
+# create per capita vars
 cov_w_orgs <- cov_w_orgs %>% 
   mutate(rel_per_10k = rel_orgs / (population / 10000),
          civic_per_10k = civic_orgs / ( population / 10000),
@@ -730,29 +782,36 @@ cov_w_orgs <- cov_w_orgs %>%
          correctional_per_10k = prop_correctional_2010 * 10000,
          tests_per_10k = tests_per_capita * 10000)
 
+# scale all numeric vars
 scaled_df <- cov_w_orgs %>%
   mutate_if(is.numeric, scale)
 
+# create list of old and new names for renaming
 old_names <- c('pop_per_mile2', 'prop_65_above', 'prop_nhblack','prop_hispanic', 'median_income', 'gini', 'dissimilarity_index', 'interaction_index', 'prop_college_above', 'correctional_per_10k', 'nursing_per_10k', 'percent_obese_ages_20_and_above', 'percent_without_insurance_under_65', 'primary_care_physicians_per_100k', 'hospital_beds_per_10k', 'rel_per_10k', 'civic_per_10k', 'parks_per_10k', 'eld_dis_per_10k')
 
 new_names <- c('Population Density', '% 65 and Above', '% Black', '% Hispanic', 'Median Income', 'Gini Index (Economic Inequality)', 'Black-White Dissimilarity Index', 'Black-White Interaction Index', '% College Degree', '% Living in Correctional Facility', '% Living in Nursing Home', '% Obese', '% Without Health Insurance', 'Primary Care Doctors', 'Hospital Beds', 'Religious Organizations', 'Civic Organizations', 'Parks', 'Service Orgs Focused on Elderly/Disabled')
 
+# fixed effects model 
 cases_orgs_plm <- plm(confirmed_cases_per_10k ~ pop_per_mile2 + prop_65_above + prop_nhblack + prop_hispanic + median_income + gini + dissimilarity_index + interaction_index + prop_college_above + correctional_per_10k + nursing_per_10k + percent_obese_ages_20_and_above + percent_without_insurance_under_65 + primary_care_physicians_per_100k + hospital_beds_per_10k + rel_per_10k + civic_per_10k + parks_per_10k + eld_dis_per_10k, data = scaled_df, model = 'within', index = 'state')
 
+# create table of model results
 cases_model_df <- tidy(cases_orgs_plm, conf.int = TRUE) %>% 
   filter(!str_detect(term, 'factor|Intercept'))
 
-# rename terms
+# rename terms using lists above
 new_terms_cases <- plyr::mapvalues(cases_model_df$term, from = old_names, to = new_names)
 cases_model_df$term <- new_terms_cases
 
+# get only significant (at 0.05 level) IVs
 cond_cases_model <- cases_model_df %>% 
   filter(p.value < 0.05 & !str_detect(term, 'tests'))
 
+# reorder vars for plot
 cases_new_order <- order(cond_cases_model$estimate, decreasing = FALSE)
 cond_cases_model$term <- as.character(cond_cases_model$term)
 cond_cases_model$term <- factor(cond_cases_model$term, levels = cond_cases_model$term[cases_new_order])
 
+# plot coefficient plot
 plot_cases <- ggplot(cond_cases_model, aes(x=term, y = estimate)) + 
   geom_hline(yintercept=0, colour="#8C2318") +  # Line at 0
   geom_pointrange(aes(ymin=conf.low, ymax=conf.high)) +  # Ranges for each coefficient
@@ -760,22 +819,27 @@ plot_cases <- ggplot(cond_cases_model, aes(x=term, y = estimate)) +
   coord_flip() +
   theme_minimal()
 
+# fixed effects model
 deaths_orgs_plm <- plm(deaths_per_10k ~ pop_per_mile2 + prop_65_above + prop_nhblack + prop_hispanic + median_income + gini + dissimilarity_index + interaction_index + prop_college_above + correctional_per_10k + nursing_per_10k + percent_obese_ages_20_and_above + percent_without_insurance_under_65 + primary_care_physicians_per_100k + hospital_beds_per_10k + rel_per_10k + civic_per_10k + parks_per_10k + eld_dis_per_10k, data = scaled_df, model = 'within', index = 'state')
 
+# create table of model results
 deaths_model_df <- tidy(deaths_orgs_plm, conf.int = TRUE) %>% 
   filter(!str_detect(term, 'factor|Intercept'))
 
-# rename terms
+# rename terms using lists above
 new_terms_deaths <- plyr::mapvalues(deaths_model_df$term, from = old_names, to = new_names)
 deaths_model_df$term <- new_terms_deaths
 
+# keep only sig. IVs
 cond_deaths_model <- deaths_model_df %>% 
   filter(p.value < 0.05 & !str_detect(term, 'tests'))
 
+# reorder vars for plot
 deaths_new_order <- order(cond_deaths_model$estimate, decreasing = FALSE)
 cond_deaths_model$term <- as.character(cond_deaths_model$term)
 cond_deaths_model$term <- factor(cond_deaths_model$term, levels = cond_deaths_model$term[deaths_new_order])
 
+# plot coefficients plot
 plot_deaths <- ggplot(cond_deaths_model, aes(x=term, y = estimate)) + 
   geom_hline(yintercept=0, colour="#8C2318") +  # Line at 0
   geom_pointrange(aes(ymin=conf.low, ymax=conf.high)) +  # Ranges for each coefficient
@@ -783,6 +847,7 @@ plot_deaths <- ggplot(cond_deaths_model, aes(x=term, y = estimate)) +
   coord_flip() +
   theme_minimal()
 
+# save coef plot
 ggsave(plot_deaths, filename = paste0('coef_plot_', Sys.Date()-1, '.png'))
 
 ```
@@ -794,10 +859,13 @@ Column {style="height:48pc;"}
 
 ```{r results='asis'}
 
+# create list of IVs
 iv_list <- c('Population Density', '% 65 and Above', '% Black', '% Hispanic', 'Median Income', 'Gini Index (Economic Inequality)', 'Black-White Dissimilarity Index', 'Black-White Interaction Index', '% College Degree', '% Living in Correctional Facility', '% Living in Nursing Home', '% Obese', '% Without Health Insurance', 'Primary Care Doctors', 'Hospital Beds', 'Religious Organizations', 'Civic Organizations', 'Parks', 'Service Orgs Focused on Elderly/Disabled', '(Intercept)')
 
+# create title
 title <- paste0('Fixed Effects Model of Covid-19 Deaths per Capita in U.S. Counties, January 22 - ', format(Sys.Date()-1, "%B %d"))
 
+# stargazer table
 stargazer(deaths_orgs_plm, df = FALSE, dep.var.labels = 'Deaths per Capita', covariate.labels = iv_list, title = title, type = 'html', single.row = TRUE, omit = 'factor', notes = 'Variables are population weighted and scaled, with a mean of 0 and standard deviation of 1.</br><span>&#42;&#42;&#42;</span>: p<0.001; <span>&#42;&#42;</span>: p<0.01; <span>&#42;</span>: p<0.05', notes.append = FALSE, add.lines = list(c('State Fixed Effects?', 'Yes')), digits = 2, column.sep.width = '1pt', star.cutoffs = c(0.05, 0.01, 0.001), out = paste0('covid_deaths_regression_', Sys.Date()-1, '.html'))
 
 ```
